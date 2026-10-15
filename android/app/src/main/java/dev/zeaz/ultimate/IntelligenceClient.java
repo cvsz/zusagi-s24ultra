@@ -47,7 +47,7 @@ public final class IntelligenceClient {
         throw new IllegalStateException("Intelligence API HTTP " + status);
       }
       try (InputStream stream = connection.getInputStream()) {
-        byte[] bytes = stream.readAllBytes();
+        byte[] bytes = stream.readNBytes(262145);
         if (bytes.length > 262144) throw new IllegalStateException("Response too large");
         JSONObject payload = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
         JSONObject scores = payload.optJSONObject("scores");
