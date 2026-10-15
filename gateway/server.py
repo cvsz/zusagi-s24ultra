@@ -9,11 +9,22 @@ import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler
+from urllib.error import HTTPError
 
 MAX_BODY = 8192
 MAX_MESSAGE = 4000
 MAX_UPSTREAM = 262144
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def open_upstream(request):
+    opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
+    return opener.open(request, timeout=30)
 SYSTEM_PROMPT = (
     "You are ZEAZ Ultimate, a helpful Thai-first assistant. "
     "Do not claim to have executed tools, accessed a device, or changed infrastructure. "
@@ -29,7 +40,7 @@ def config():
     parsed = urlsplit(base)
     if not token or len(token) < 24 or not api_key or not model:
         raise ValueError("Missing gateway token (min 24 chars), AI key or model")
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.port not in (None, 443) or parsed.hostname.lower() in ("localhost", "127.0.0.1", "::1"):
         raise ValueError("AI base URL must be an HTTPS origin or path without credentials/query/fragment")
     return token, api_key, model, base.rstrip("/")
 
@@ -50,7 +61,7 @@ def generate_reply(message, settings):
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
         method="POST",
     )
-    with urlopen(req, timeout=30, context=ssl.create_default_context()) as response:
+    with open_upstream(req) as response:
         raw = response.read(MAX_UPSTREAM + 1)
     if len(raw) > MAX_UPSTREAM:
         raise ValueError("Upstream response too large")
@@ -92,12 +103,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(413, {"error": "invalid_body_size"})
         try:
             data = json.loads(self.rfile.read(size))
+        except (ValueError, UnicodeDecodeError):
+            return self.respond(400, {"error": "invalid_json"})
+        try:
             message = data.get("message") if isinstance(data, dict) else None
             if not isinstance(message, str) or not message.strip() or len(message) > MAX_MESSAGE:
                 return self.respond(400, {"error": "invalid_message"})
             reply = generate_reply(message, self.settings)
         except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
-            return self.respond(400, {"error": "invalid_request_or_response"})
+            return self.respond(502, {"error": "invalid_upstream_response"})
         except (HTTPError, URLError, TimeoutError, OSError):
             return self.respond(502, {"error": "upstream_unavailable"})
         return self.respond(200, {"reply": reply})
