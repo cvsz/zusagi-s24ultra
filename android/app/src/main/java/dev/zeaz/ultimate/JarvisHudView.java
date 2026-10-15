@@ -8,6 +8,7 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.view.View;
+import android.provider.Settings;
 
 /**
  * Lightweight animated, depth-inspired AI HUD. Rendering is decorative only:
@@ -19,6 +20,7 @@ public final class JarvisHudView extends View {
     private long epoch = android.os.SystemClock.uptimeMillis();
     private boolean active = true;
     private boolean processing = false;
+    private boolean resumed = false;
 
     public JarvisHudView(Context context) {
         super(context);
@@ -29,6 +31,20 @@ public final class JarvisHudView extends View {
     public void setProcessing(boolean value) {
         processing = value;
         invalidate();
+    }
+
+    public void setResumed(boolean value) {
+        resumed = value;
+        if (value) postInvalidateOnAnimation();
+    }
+
+    private boolean motionEnabled() {
+        try {
+            return Settings.Global.getFloat(getContext().getContentResolver(),
+                    Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f;
+        } catch (SecurityException ex) {
+            return false;
+        }
     }
 
     @Override protected void onAttachedToWindow() {
@@ -61,7 +77,7 @@ public final class JarvisHudView extends View {
         if (width <= 0 || height <= 0) return;
         float x = width / 2f, y = height * 0.49f;
         float unit = Math.min(width / 340f, height / 220f);
-        float angle = ((android.os.SystemClock.uptimeMillis() - epoch) % 24000L) * 360f / 24000f;
+        float angle = motionEnabled() ? ((android.os.SystemClock.uptimeMillis() - epoch) % 24000L) * 360f / 24000f : 0f;
         float pulse = (float) Math.sin(Math.toRadians(angle * 3)) * 0.5f + 0.5f;
         int cyan = Color.rgb(61, 221, 255);
         int blue = Color.rgb(83, 112, 255);
@@ -116,7 +132,7 @@ public final class JarvisHudView extends View {
         paint.setTextSize(9 * unit);
         paint.setColor(Color.argb(220, 159, 235, 255));
         canvas.drawText(processing ? "PROCESSING" : "AI CORE ONLINE", x, y + 98 * unit, paint);
-        if (active && getWindowVisibility() == VISIBLE && isShown()) {
+        if (active && resumed && motionEnabled() && getWindowVisibility() == VISIBLE && isShown()) {
             postInvalidateDelayed(40);
         }
     }
