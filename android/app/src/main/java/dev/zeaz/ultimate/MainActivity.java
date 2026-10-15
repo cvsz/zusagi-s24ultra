@@ -23,7 +23,17 @@ public final class MainActivity extends Activity {
     tts = new TextToSpeech(this, status -> { if (status == TextToSpeech.SUCCESS) tts.setLanguage(new Locale("th", "TH")); });
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
-    root.setPadding(24,24,24,24);
+    root.setPadding(36,36,36,36);
+    getWindow().setStatusBarColor(0xFF11121A);
+    getWindow().setNavigationBarColor(0xFF11121A);
+    root.setBackgroundColor(0xFF11121A);
+    TextView title = new TextView(this);
+    title.setText("ZUSAGI  /  ZEAZDEV\\nAI Control Center");
+    title.setTextColor(0xFFD0BCFF);
+    title.setTextSize(27);
+    title.setTypeface(null, 1);
+    title.setPadding(0, 12, 0, 32);
+    root.addView(title);
     ScrollView scroll = new ScrollView(this); scroll.addView(root);
     endpoint = field(root, "HTTPS gateway URL", false);
     endpoint.setText(getPreferences(MODE_PRIVATE).getString("endpoint",""));
@@ -34,6 +44,18 @@ public final class MainActivity extends Activity {
     Button speak = new Button(this); speak.setText("Speak Response"); root.addView(speak);
     output = new TextView(this); output.setText("Ready. Configure HTTPS endpoint and token."); root.addView(output);
     setContentView(scroll);
+    endpoint.setTextColor(0xFFE6E1E5);
+    token.setTextColor(0xFFE6E1E5);
+    input.setTextColor(0xFFE6E1E5);
+    output.setTextColor(0xFFE6E1E5);
+    endpoint.setHintTextColor(0xFFCAC4D0);
+    token.setHintTextColor(0xFFCAC4D0);
+    input.setHintTextColor(0xFFCAC4D0);
+    for (Button button : new Button[]{send, voice, speak}) {
+      button.setAllCaps(false);
+      button.setTextColor(0xFF1C1B1F);
+      button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFFD0BCFF));
+    }
     send.setOnClickListener(v -> ask());
     voice.setOnClickListener(v -> { Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH); i.putExtra(RecognizerIntent.EXTRA_LANGUAGE,"th-TH"); try {startActivityForResult(i,VOICE_REQUEST);} catch(Exception e){output.setText("Speech recognition unavailable");}});
     speak.setOnClickListener(v -> tts.speak(output.getText().toString(),TextToSpeech.QUEUE_FLUSH,null,"zeaz"));
