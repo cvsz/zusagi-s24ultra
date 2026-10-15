@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.WindowInsets;
@@ -55,6 +56,22 @@ public final class MainActivity extends Activity {
             }
         }));
         buildScreen();
+        if (tts != null) {
+            tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override public void onStart(String utteranceId) {
+                    runOnUiThread(() -> {
+                        if (!destroyed && hud != null) hud.setState(JarvisHudView.State.SPEAKING);
+                    });
+                }
+                @Override public void onDone(String utteranceId) { resetSpeechHud(); }
+                @Override public void onError(String utteranceId) { resetSpeechHud(); }
+                private void resetSpeechHud() {
+                    runOnUiThread(() -> {
+                        if (!destroyed && hud != null) hud.setState(JarvisHudView.State.IDLE);
+                    });
+                }
+            });
+        }
     }
 
     private int dp(int value) {
@@ -379,6 +396,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == VOICE_REQUEST && hud != null) hud.setState(JarvisHudView.State.IDLE);
         if (requestCode == VOICE_REQUEST && resultCode == RESULT_OK && data != null) {
             ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
             if (results != null && !results.isEmpty()) input.setText(results.get(0));
@@ -391,7 +409,10 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
-        if (hud != null) hud.setResumed(false);
+        if (hud != null) {
+            hud.setResumed(false);
+            if (hud.getState() == JarvisHudView.State.LISTENING) hud.setState(JarvisHudView.State.IDLE);
+        }
         super.onPause();
     }
 
