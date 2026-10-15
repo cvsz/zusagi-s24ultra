@@ -24,3 +24,9 @@ Build the Android debug APK with the existing Android GitHub Actions workflow or
 
 ## Limitations
 This is a single-turn chat interface with response playback, not a multi-turn persistent chat, remote tools, or a production-grade agent executor. Android device tests, credential rotation and reverse proxy hardening remain release gates.
+
+## JARVIS-inspired depth HUD
+- A custom Canvas-based animated holographic core appears below the header (elliptical 3D-style rings, perspective grid, pulsing center, rotating status arcs).
+- Processing indicator reacts to outgoing AI requests; HUD is decorative and has no microphone, camera or network access.
+- Avoids third-party rendering SDKs and preserves Java 17, API 28+ compatibility.
+- Requires real-device performance, pause/resume, and accessibility/reduced-motion checks before release.
