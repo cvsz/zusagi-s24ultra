@@ -17,14 +17,18 @@ public final class IntelligenceClient {
   public static String analyze(String endpoint, String sessionToken, String symbol,
                                String chain, String address) throws Exception {
     URL url = new URL(endpoint.replaceAll("/+$", "") + "/v1/analyze");
-    if (!"https".equalsIgnoreCase(url.getProtocol()) || url.getUserInfo() != null) {
+    if (!"https".equalsIgnoreCase(url.getProtocol()) || url.getUserInfo() != null
+        || url.getHost().isEmpty() || (url.getPort() != -1 && url.getPort() != 443)
+        || !"/v1/analyze".equals(url.getPath()) || url.getQuery() != null
+        || url.getRef() != null) {
       throw new IllegalArgumentException("HTTPS endpoint without embedded credentials required");
     }
-    if (symbol.trim().isEmpty() || chain.trim().isEmpty()) {
+    if (symbol == null || chain == null || symbol.trim().isEmpty() || chain.trim().isEmpty()) {
       throw new IllegalArgumentException("Symbol and chain are required");
     }
     HttpURLConnection connection = (HttpURLConnection) url.openConnection();
     try {
+      connection.setInstanceFollowRedirects(false);
       connection.setConnectTimeout(10000);
       connection.setReadTimeout(20000);
       connection.setRequestMethod("POST");
