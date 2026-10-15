@@ -11,8 +11,6 @@ import android.speech.tts.TextToSpeech;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
-import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -43,13 +41,17 @@ public final class MainActivity extends Activity {
     private JarvisHudView hud;
     private boolean busy = false;
     private boolean speechReady = false;
+    private boolean destroyed = false;
+    private boolean ttsInitialized = false;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        tts = new TextToSpeech(this, result -> {
-            speechReady = result == TextToSpeech.SUCCESS
-                    && tts.setLanguage(new Locale("th", "TH")) >= TextToSpeech.LANG_AVAILABLE;
-        });
+        tts = new TextToSpeech(this, result -> runOnUiThread(() -> {
+            ttsInitialized = result == TextToSpeech.SUCCESS;
+            if (!destroyed && ttsInitialized && tts != null) {
+                speechReady = tts.setLanguage(new Locale("th", "TH")) >= TextToSpeech.LANG_AVAILABLE;
+            }
+        }));
         buildScreen();
     }
 
@@ -180,7 +182,7 @@ public final class MainActivity extends Activity {
         speak = action("Speak response in Thai", Color.rgb(48, 61, 86));
         response.addView(speak, new LinearLayout.LayoutParams(-1, dp(48)));
         speak.setOnClickListener(v -> {
-            if (!speechReady) {
+            if (!speechReady || tts == null || destroyed) {
                 Toast.makeText(this, "Thai text-to-speech unavailable", Toast.LENGTH_SHORT).show();
                 return;
             }
@@ -275,6 +277,7 @@ public final class MainActivity extends Activity {
             final String reply = answer;
             final boolean ok = success;
             runOnUiThread(() -> {
+                if (destroyed || isFinishing()) return;
                 output.setText(reply);
                 status.setText(ok ? "●  Connected · Response received" : "●  Gateway request failed");
                 setBusy(false);
@@ -290,8 +293,20 @@ public final class MainActivity extends Activity {
         }
     }
 
+    @Override protected void onResume() {
+        super.onResume();
+        if (hud != null) hud.setResumed(true);
+    }
+
+    @Override protected void onPause() {
+        if (hud != null) hud.setResumed(false);
+        super.onPause();
+    }
+
     @Override protected void onDestroy() {
-        if (tts != null) { tts.stop(); tts.shutdown(); }
+        destroyed = true;
+        speechReady = false;
+        if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
         super.onDestroy();
     }
 }
