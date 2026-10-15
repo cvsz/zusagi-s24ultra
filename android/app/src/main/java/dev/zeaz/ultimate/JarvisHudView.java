@@ -19,7 +19,8 @@ public final class JarvisHudView extends View {
     private final RectF oval = new RectF();
     private long epoch = android.os.SystemClock.uptimeMillis();
     private boolean active = true;
-    private boolean processing = false;
+    public enum State { IDLE, LISTENING, THINKING, SPEAKING, ERROR }
+    private State state = State.IDLE;
     private boolean resumed = false;
 
     public JarvisHudView(Context context) {
@@ -29,9 +30,15 @@ public final class JarvisHudView extends View {
     }
 
     public void setProcessing(boolean value) {
-        processing = value;
+        setState(value ? State.THINKING : State.IDLE);
+    }
+
+    public void setState(State value) {
+        state = value == null ? State.IDLE : value;
         invalidate();
     }
+
+    public State getState() { return state; }
 
     public void setResumed(boolean value) {
         resumed = value;
@@ -79,7 +86,10 @@ public final class JarvisHudView extends View {
         float unit = Math.min(width / 340f, height / 220f);
         float angle = motionEnabled() ? ((android.os.SystemClock.uptimeMillis() - epoch) % 24000L) * 360f / 24000f : 0f;
         float pulse = (float) Math.sin(Math.toRadians(angle * 3)) * 0.5f + 0.5f;
-        int cyan = Color.rgb(61, 221, 255);
+        int cyan = state == State.ERROR ? Color.rgb(255, 109, 125)
+                : state == State.LISTENING ? Color.rgb(79, 215, 168)
+                : state == State.SPEAKING ? Color.rgb(255, 188, 87)
+                : Color.rgb(61, 221, 255);
         int blue = Color.rgb(83, 112, 255);
 
         paint.reset();
@@ -131,7 +141,11 @@ public final class JarvisHudView extends View {
         paint.setTypeface(android.graphics.Typeface.DEFAULT);
         paint.setTextSize(9 * unit);
         paint.setColor(Color.argb(220, 159, 235, 255));
-        canvas.drawText(processing ? "PROCESSING" : "AI CORE ONLINE", x, y + 98 * unit, paint);
+        String caption = state == State.LISTENING ? "LISTENING"
+                : state == State.THINKING ? "PROCESSING"
+                : state == State.SPEAKING ? "SPEAKING"
+                : state == State.ERROR ? "CONNECTION ERROR" : "AI CORE ONLINE";
+        canvas.drawText(caption, x, y + 98 * unit, paint);
         if (active && resumed && motionEnabled() && getWindowVisibility() == VISIBLE && isShown()) {
             postInvalidateDelayed(40);
         }
