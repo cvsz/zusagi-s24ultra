@@ -46,6 +46,7 @@ public final class MainActivity extends Activity {
     private boolean speechReady = false;
     private boolean destroyed = false;
     private boolean ttsInitialized = false;
+    private boolean speechActive = false;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -60,14 +61,17 @@ public final class MainActivity extends Activity {
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override public void onStart(String utteranceId) {
                     runOnUiThread(() -> {
-                        if (!destroyed && hud != null) hud.setState(JarvisHudView.State.SPEAKING);
+                        if (!destroyed && speechActive && hud != null) hud.setState(JarvisHudView.State.SPEAKING);
                     });
                 }
                 @Override public void onDone(String utteranceId) { resetSpeechHud(); }
                 @Override public void onError(String utteranceId) { resetSpeechHud(); }
                 private void resetSpeechHud() {
                     runOnUiThread(() -> {
-                        if (!destroyed && hud != null) hud.setState(JarvisHudView.State.IDLE);
+                        if (!destroyed && hud != null) {
+                            speechActive = false;
+                            hud.setState(busy ? JarvisHudView.State.THINKING : JarvisHudView.State.IDLE);
+                        }
                     });
                 }
             });
@@ -238,9 +242,13 @@ public final class MainActivity extends Activity {
                 if (hud != null) hud.setState(JarvisHudView.State.ERROR);
                 return;
             }
+            speechActive = true;
             if (hud != null) hud.setState(JarvisHudView.State.SPEAKING);
             int result = tts.speak(output.getText().toString(), TextToSpeech.QUEUE_FLUSH, null, "zeaz-response");
-            if (result == TextToSpeech.ERROR && hud != null) hud.setState(JarvisHudView.State.ERROR);
+            if (result == TextToSpeech.ERROR) {
+                speechActive = false;
+                if (hud != null) hud.setState(JarvisHudView.State.ERROR);
+            }
         });
         addSpace(root, 20);
         root.addView(text("Gateway credentials stay in memory for this session only. Requests use HTTPS.", 12, SUBTLE, false));
@@ -262,7 +270,7 @@ public final class MainActivity extends Activity {
 
     private void setBusy(boolean value) {
         busy = value;
-        if (hud != null) hud.setProcessing(value);
+        if (hud != null && (value || !speechActive)) hud.setProcessing(value);
         send.setEnabled(!value);
         send.setAlpha(value ? 0.6f : 1f);
         if (intelligence != null) {
@@ -421,6 +429,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         destroyed = true;
+        speechActive = false;
         speechReady = false;
         if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
         super.onDestroy();
