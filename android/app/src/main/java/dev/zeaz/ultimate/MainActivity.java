@@ -56,12 +56,38 @@ public final class MainActivity extends Activity {
       button.setTextColor(0xFF1C1B1F);
       button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFFD0BCFF));
     }
+    Button intel = new Button(this);
+    intel.setText("Analyze Token (Advisory)");
+    intel.setAllCaps(false);
+    intel.setTextColor(0xFF1C1B1F);
+    intel.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFFB4CC9B));
+    root.addView(intel);
+    intel.setOnClickListener(v -> analyzeToken());
     send.setOnClickListener(v -> ask());
     voice.setOnClickListener(v -> { Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH); i.putExtra(RecognizerIntent.EXTRA_LANGUAGE,"th-TH"); try {startActivityForResult(i,VOICE_REQUEST);} catch(Exception e){output.setText("Speech recognition unavailable");}});
     speak.setOnClickListener(v -> tts.speak(output.getText().toString(),TextToSpeech.QUEUE_FLUSH,null,"zeaz"));
   }
   private EditText field(LinearLayout parent,String hint,boolean secret) {
     EditText e=new EditText(this); e.setHint(hint); if(secret)e.setInputType(129); parent.addView(e); return e;
+  }
+  private void analyzeToken() {
+    String gateway = endpoint.getText().toString().trim();
+    String secret = token.getText().toString().trim();
+    String value = input.getText().toString().trim();
+    String[] fields = value.split(":", 3);
+    if (!gateway.startsWith("https://") || secret.isEmpty() || fields.length != 3) {
+      output.setText("For intelligence, enter chain:symbol:address and configure HTTPS gateway + token.");
+      return;
+    }
+    output.setText("Analyzing token...");
+    new Thread(() -> {
+      try {
+        String response = IntelligenceClient.analyze(gateway, secret, fields[1], fields[0], fields[2]);
+        runOnUiThread(() -> output.setText(response));
+      } catch (Exception e) {
+        runOnUiThread(() -> output.setText("Intelligence request failed: " + e.getClass().getSimpleName()));
+      }
+    }).start();
   }
   private void ask() {
     String url=endpoint.getText().toString().trim(), access=token.getText().toString().trim(), prompt=input.getText().toString().trim();
