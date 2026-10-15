@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$Serial,
     [string]$Package = "dev.zeaz.ultimate.debug",
-    [int]$WaitSeconds = 6
+    [int]$WaitSeconds = 6,
+    [string]$EvidenceDirectory = ""
 )
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -29,6 +30,31 @@ try {
     $crashes = (& adb -s $Serial logcat -d -b crash -v time) -join "`n"
     if ($crashes -match [regex]::Escape("Process: $Package")) {
         throw "Fatal Android crash for $Package found in crash buffer"
+    }
+    if ($EvidenceDirectory) {
+        $destination = [System.IO.Path]::GetFullPath($EvidenceDirectory)
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $prefix = Join-Path $destination "smoke-$stamp"
+        $head = (git -C $root rev-parse HEAD).Trim()
+        @(
+            "Commit: $head"
+            "Device: $Serial"
+            "Package: $Package"
+            "Timestamp: $(Get-Date -Format o)"
+            "Build: PASS"
+            "Install: PASS"
+            "Launch: PASS"
+            "Process alive: PASS"
+            "Crash buffer: PASS"
+            "Manual UI, IME, STT/TTS and network tests: NOT_VERIFIED"
+            "Review screenshots for secrets before sharing."
+        ) | Set-Content -Path "$prefix-summary.txt" -Encoding utf8
+        & adb -s $Serial shell wm size | Out-File "$prefix-display.txt"
+        & adb -s $Serial shell wm density | Out-File "$prefix-density.txt"
+        & adb -s $Serial exec-out screencap -p > "$prefix-screen.png"
+        if ($LASTEXITCODE -ne 0) { throw "Screenshot capture failed" }
+        Write-Host "Local evidence saved: $prefix-*"
     }
     Write-Host "PASS: $Package running (PID $($pidText.Trim())); no package crash in cleared crash buffer."
     Write-Host "Manual checks still required: navigation insets, IME, Thai STT/TTS, network failure, offline mode."
