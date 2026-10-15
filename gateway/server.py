@@ -24,6 +24,8 @@ class NoRedirect(HTTPRedirectHandler):
 def open_upstream(request):
     opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
     return opener.open(request, timeout=30)
+
+
 SYSTEM_PROMPT = (
     "You are ZEAZ Ultimate, a helpful Thai-first assistant. "
     "Do not claim to have executed tools, accessed a device, or changed infrastructure. "
@@ -36,10 +38,14 @@ def config():
     api_key = os.environ.get("ZEAZ_AI_API_KEY", "")
     model = os.environ.get("ZEAZ_AI_MODEL", "")
     base = os.environ.get("ZEAZ_AI_BASE_URL", "")
-    parsed = urlsplit(base)
+    try:
+        parsed = urlsplit(base)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Invalid AI base URL") from exc
     if not token or len(token) < 24 or not api_key or not model:
         raise ValueError("Missing gateway token (min 24 chars), AI key or model")
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.port not in (None, 443) or parsed.hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or port not in (None, 443) or parsed.hostname.lower() in ("localhost", "127.0.0.1", "::1"):
         raise ValueError("AI base URL must be an HTTPS origin or path without credentials/query/fragment")
     return token, api_key, model, base.rstrip("/")
 
