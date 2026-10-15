@@ -215,9 +215,12 @@ public final class MainActivity extends Activity {
         speak.setOnClickListener(v -> {
             if (!speechReady || tts == null || destroyed) {
                 Toast.makeText(this, "Thai text-to-speech unavailable", Toast.LENGTH_SHORT).show();
+                if (hud != null) hud.setState(JarvisHudView.State.ERROR);
                 return;
             }
-            tts.speak(output.getText().toString(), TextToSpeech.QUEUE_FLUSH, null, "zeaz-response");
+            if (hud != null) hud.setState(JarvisHudView.State.SPEAKING);
+            int result = tts.speak(output.getText().toString(), TextToSpeech.QUEUE_FLUSH, null, "zeaz-response");
+            if (result == TextToSpeech.ERROR && hud != null) hud.setState(JarvisHudView.State.ERROR);
         });
         addSpace(root, 20);
         root.addView(text("Gateway credentials stay in memory for this session only. Requests use HTTPS.", 12, SUBTLE, false));
@@ -229,9 +232,11 @@ public final class MainActivity extends Activity {
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "th-TH");
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         try {
+            if (hud != null) hud.setState(JarvisHudView.State.LISTENING);
             startActivityForResult(intent, VOICE_REQUEST);
         } catch (Exception ex) {
             status.setText("●  Speech recognition unavailable");
+            if (hud != null) hud.setState(JarvisHudView.State.ERROR);
         }
     }
 
