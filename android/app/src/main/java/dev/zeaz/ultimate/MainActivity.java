@@ -40,6 +40,7 @@ public final class MainActivity extends Activity {
     private TextView status, output;
     private Button send, speak;
     private TextToSpeech tts;
+    private JarvisHudView hud;
     private boolean busy = false;
     private boolean speechReady = false;
 
@@ -116,7 +117,10 @@ public final class MainActivity extends Activity {
         root.addView(text("Your AI companion", 29, TEXT, true));
         addSpace(root, 5);
         root.addView(text("Private gateway · Thai voice · Local AI", 13, SUBTLE, false));
-        addSpace(root, 24);
+        addSpace(root, 18);
+        hud = new JarvisHudView(this);
+        root.addView(hud, new LinearLayout.LayoutParams(-1, dp(226)));
+        addSpace(root, 18);
 
         LinearLayout connection = new LinearLayout(this);
         connection.setOrientation(LinearLayout.VERTICAL);
@@ -199,6 +203,7 @@ public final class MainActivity extends Activity {
 
     private void setBusy(boolean value) {
         busy = value;
+        if (hud != null) hud.setProcessing(value);
         send.setEnabled(!value);
         send.setAlpha(value ? 0.6f : 1f);
     }
