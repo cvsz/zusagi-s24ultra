@@ -20,7 +20,11 @@ public final class MainActivity extends Activity {
   private TextToSpeech tts;
   @Override public void onCreate(Bundle b) {
     super.onCreate(b);
-    tts = new TextToSpeech(this, status -> { if (status == TextToSpeech.SUCCESS) tts.setLanguage(new Locale("th", "TH")); });
+    tts = new TextToSpeech(this, status -> {
+      if (status == TextToSpeech.SUCCESS && tts != null) {
+        tts.setLanguage(new Locale("th", "TH"));
+      }
+    });
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setPadding(36,36,36,36);
@@ -83,7 +87,13 @@ public final class MainActivity extends Activity {
     intel.setOnClickListener(v -> analyzeToken());
     send.setOnClickListener(v -> ask());
     voice.setOnClickListener(v -> { Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH); i.putExtra(RecognizerIntent.EXTRA_LANGUAGE,"th-TH"); try {startActivityForResult(i,VOICE_REQUEST);} catch(Exception e){output.setText("Speech recognition unavailable");}});
-    speak.setOnClickListener(v -> tts.speak(output.getText().toString(),TextToSpeech.QUEUE_FLUSH,null,"zeaz"));
+    speak.setOnClickListener(v -> {
+      if (tts == null) {
+        output.setText("Text-to-speech is not available.");
+        return;
+      }
+      tts.speak(output.getText().toString(), TextToSpeech.QUEUE_FLUSH, null, "zeaz");
+    });
   }
   private EditText field(LinearLayout parent,String hint,boolean secret) {
     EditText e=new EditText(this); e.setHint(hint); if(secret)e.setInputType(129); parent.addView(e); return e;
