@@ -148,13 +148,16 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            android.view.WindowInsetsController controller = scroll.getWindowInsetsController();
-            if (controller != null) {
-                controller.setSystemBarsAppearance(0,
-                        android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                        | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
-            }
-            scroll.requestApplyInsets();
+            scroll.post(() -> {
+                if (destroyed || !scroll.isAttachedToWindow()) return;
+                android.view.WindowInsetsController controller = scroll.getWindowInsetsController();
+                if (controller != null) {
+                    controller.setSystemBarsAppearance(0,
+                            android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                            | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                }
+                scroll.requestApplyInsets();
+            });
         }
 
         root.addView(text("ZEAZ  /  ULTIMATE", 13, SUCCESS, true));
