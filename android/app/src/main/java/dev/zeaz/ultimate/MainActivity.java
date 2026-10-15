@@ -28,13 +28,31 @@ public final class MainActivity extends Activity {
     getWindow().setNavigationBarColor(0xFF11121A);
     root.setBackgroundColor(0xFF11121A);
     TextView title = new TextView(this);
-    title.setText("ZUSAGI  /  ZEAZDEV\\nAI Control Center");
+    title.setText("ZUSAGI  /  ZEAZDEV\nAI Control Center");
     title.setTextColor(0xFFD0BCFF);
     title.setTextSize(27);
     title.setTypeface(null, 1);
     title.setPadding(0, 12, 0, 32);
     root.addView(title);
-    ScrollView scroll = new ScrollView(this); scroll.addView(root);
+    ScrollView scroll = new ScrollView(this);
+    scroll.setFillViewport(true);
+    scroll.setBackgroundColor(0xFF11121A);
+    scroll.addView(root);
+    android.view.WindowInsetsController insetsController = getWindow().getInsetsController();
+    if (insetsController != null) {
+      insetsController.setSystemBarsAppearance(0,
+          android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS |
+          android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+    }
+    if (android.os.Build.VERSION.SDK_INT >= 35) {
+      scroll.setOnApplyWindowInsetsListener((view, insets) -> {
+        android.graphics.Insets bars = insets.getInsets(
+            android.view.WindowInsets.Type.systemBars() |
+            android.view.WindowInsets.Type.displayCutout());
+        view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+        return insets;
+      });
+    }
     endpoint = field(root, "HTTPS gateway URL", false);
     endpoint.setText(getPreferences(MODE_PRIVATE).getString("endpoint",""));
     token = field(root, "Device access token (session only)", true);
