@@ -5,6 +5,7 @@ No device-side provider credentials, arbitrary tool execution, or agent side eff
 import hmac
 import json
 import os
+import ipaddress
 import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
@@ -45,7 +46,15 @@ def config():
         raise ValueError("Invalid AI base URL") from exc
     if not token or len(token) < 24 or not api_key or not model:
         raise ValueError("Missing gateway token (min 24 chars), AI key or model")
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or port not in (None, 443) or parsed.hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if (parsed.scheme != "https" or not hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or port not in (None, 443)
+            or hostname == "localhost" or hostname.endswith(".localhost")
+            or hostname.endswith(".local") or (address is not None and not address.is_global)):
         raise ValueError("AI base URL must be an HTTPS origin or path without credentials/query/fragment")
     return token, api_key, model, base.rstrip("/")
 
@@ -98,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/v1/chat":
             return self.respond(404, {"error": "not_found"})
         auth = self.headers.get("Authorization", "")
-        if not hmac.compare_digest(auth.encode("utf-8"), ("Bearer " + self.settings[0]).encode("utf-8")):
+        if not isinstance(auth, str) or not hmac.compare_digest(auth, "Bearer " + self.settings[0]):
             return self.respond(401, {"error": "unauthorized"})
         try:
             size = int(self.headers.get("Content-Length", "-1"))
