@@ -26,7 +26,7 @@ public final class JarvisHudView extends View {
     public JarvisHudView(Context context) {
         super(context);
         setContentDescription("Animated ZEAZ holographic AI interface");
-        setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
     }
 
     public void setProcessing(boolean value) {
@@ -35,6 +35,7 @@ public final class JarvisHudView extends View {
 
     public void setState(State value) {
         state = value == null ? State.IDLE : value;
+        setContentDescription("ZEAZ AI status: " + state.name().toLowerCase(java.util.Locale.ROOT));
         invalidate();
     }
 
