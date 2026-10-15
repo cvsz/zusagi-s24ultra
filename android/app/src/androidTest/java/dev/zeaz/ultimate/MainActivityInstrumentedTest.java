@@ -1,8 +1,5 @@
 package dev.zeaz.ultimate;
 
-import android.app.Instrumentation;
-import android.content.Intent;
-import android.provider.Settings;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -24,8 +21,7 @@ public final class MainActivityInstrumentedTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
             View root = screen.getWindow().getDecorView();
             assertNotNull(root);
-            assertTrue(root.findViewsWithText(new java.util.ArrayList<>(),
-                    "Your AI companion", View.FIND_VIEWS_WITH_TEXT) == 0);
+            assertTrue(findText(root, "Your AI companion"));
             assertTrue(findText(root, "Send message"));
             assertTrue(findText(root, "Voice input"));
             assertTrue(findText(root, "AI RESPONSE"));
