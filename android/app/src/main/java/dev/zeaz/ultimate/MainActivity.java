@@ -110,7 +110,8 @@ public final class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BACKGROUND);
-        scroll.setClipToPadding(false);
+        scroll.setClipToPadding(true);
+        scroll.setVerticalScrollBarEnabled(true);
         scroll.setFitsSystemWindows(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             scroll.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -118,7 +119,7 @@ public final class MainActivity extends Activity {
                         WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
                 android.graphics.Insets keyboard = insets.getInsets(WindowInsets.Type.ime());
                 view.setPadding(bars.left, bars.top, bars.right,
-                        Math.max(bars.bottom, keyboard.bottom));
+                        Math.max(bars.bottom, keyboard.bottom) + dp(16));
                 return insets;
             });
         } else {
@@ -220,6 +221,7 @@ public final class MainActivity extends Activity {
         });
         addSpace(root, 20);
         root.addView(text("Gateway credentials stay in memory for this session only. Requests use HTTPS.", 12, SUBTLE, false));
+        addSpace(root, 48);
     }
 
     private void startVoice() {
