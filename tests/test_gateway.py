@@ -2,7 +2,7 @@ import io
 import json
 import unittest
 from unittest.mock import patch
-from gateway.server import Handler, config, MAX_BODY
+from gateway.server import Handler, config, MAX_BODY, NoRedirect
 
 
 class GatewayTests(unittest.TestCase):
@@ -21,6 +21,18 @@ class GatewayTests(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             with self.assertRaises(ValueError):
                 config()
+
+    def test_redirect_is_refused(self):
+        self.assertIsNone(NoRedirect().redirect_request(None, None, 302, "Found", {}, "https://other.example/v1"))
+
+    def test_invalid_json_is_rejected(self):
+        result = self.request("/v1/chat", b"{", "Bearer " + "x" * 24)
+        self.assertEqual(result["status"], 400)
+
+    def test_upstream_failure_is_bad_gateway(self):
+        with patch("gateway.server.generate_reply", side_effect=ValueError("bad response")):
+            result = self.request("/v1/chat", b'{"message":"hi"}', "Bearer " + "x" * 24)
+        self.assertEqual(result["status"], 502)
 
     def test_chat_requires_auth(self):
         self.assertEqual(self.request("/v1/chat", b'{"message":"hi"}', "").get("status"), 401)
