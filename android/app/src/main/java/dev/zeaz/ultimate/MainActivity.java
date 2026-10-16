@@ -41,6 +41,7 @@ public final class MainActivity extends Activity {
     private TextView status, output;
     private Button send, speak, intelligence;
     private TextToSpeech tts;
+    private SpeechAudioFocusController speechFocus;
     private JarvisHudView hud;
     private boolean busy = false;
     private boolean speechReady = false;
@@ -54,6 +55,8 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        speechFocus = new SpeechAudioFocusController(
+                new AndroidSpeechAudioFocusPort(this), this::handleSpeechFocusLoss);
         tts = new TextToSpeech(this, result -> runOnUiThread(() -> {
             ttsInitialized = result == TextToSpeech.SUCCESS;
             if (!destroyed && ttsInitialized && tts != null) {
@@ -78,6 +81,7 @@ public final class MainActivity extends Activity {
                         if (!destroyed && hud != null && utteranceId.equals(activeUtteranceId)) {
                             speechActive = false;
                             activeUtteranceId = null;
+                            if (speechFocus != null) speechFocus.release();
                             transition(success ? AssistantStateMachine.Event.SPEECH_COMPLETED
                                     : AssistantStateMachine.Event.FAILURE);
                         }
@@ -110,6 +114,7 @@ public final class MainActivity extends Activity {
             speechActive = false;
             activeUtteranceId = null;
             if (tts != null) tts.stop();
+            if (speechFocus != null) speechFocus.release();
             transition(AssistantStateMachine.Event.CANCEL);
         }
         return true;
@@ -282,6 +287,11 @@ public final class MainActivity extends Activity {
                 transition(AssistantStateMachine.Event.FAILURE);
                 return;
             }
+            if (speechFocus == null || !speechFocus.acquire()) {
+                Toast.makeText(this, "Audio focus unavailable", Toast.LENGTH_SHORT).show();
+                transition(AssistantStateMachine.Event.FAILURE);
+                return;
+            }
             speechActive = true;
             activeUtteranceId = "zeaz-response-" + (++utteranceGeneration);
             transition(AssistantStateMachine.Event.SPEECH_STARTED);
@@ -290,6 +300,7 @@ public final class MainActivity extends Activity {
             if (result == TextToSpeech.ERROR) {
                 speechActive = false;
                 activeUtteranceId = null;
+                speechFocus.release();
                 transition(AssistantStateMachine.Event.FAILURE);
             }
         });
@@ -320,6 +331,17 @@ public final class MainActivity extends Activity {
             intelligence.setEnabled(!value);
             intelligence.setAlpha(value ? 0.6f : 1f);
         }
+    }
+
+    private void handleSpeechFocusLoss() {
+        runOnUiThread(() -> {
+            if (destroyed || !speechActive) return;
+            speechActive = false;
+            activeUtteranceId = null;
+            if (tts != null) tts.stop();
+            if (speechFocus != null) speechFocus.release();
+            transition(AssistantStateMachine.Event.CANCEL);
+        });
     }
 
     private void analyzeToken() {
@@ -492,6 +514,7 @@ public final class MainActivity extends Activity {
             speechActive = false;
             activeUtteranceId = null;
             if (tts != null) tts.stop();
+            if (speechFocus != null) speechFocus.release();
             transition(AssistantStateMachine.Event.CANCEL);
         }
         if (hud != null) hud.setResumed(false);
@@ -506,6 +529,7 @@ public final class MainActivity extends Activity {
         activeUtteranceId = null;
         speechReady = false;
         if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
+        if (speechFocus != null) speechFocus.release();
         super.onDestroy();
     }
 }

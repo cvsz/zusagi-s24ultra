@@ -24,6 +24,36 @@ import static org.junit.Assert.fail;
 
 @RunWith(AndroidJUnit4.class)
 public final class MainActivityInstrumentedTest {
+  @Test public void speechAudioFocusIsAcquiredReleasedAndInterruptsOnce() {
+    final int[] requests = {0}, releases = {0}, interruptions = {0};
+    SpeechAudioFocusController.AudioFocusPort port = new SpeechAudioFocusController.AudioFocusPort() {
+      @Override public boolean request(Runnable onFocusLost) { requests[0]++; return true; }
+      @Override public void abandon() { releases[0]++; }
+    };
+    SpeechAudioFocusController focus = new SpeechAudioFocusController(port, () -> interruptions[0]++);
+    assertTrue(focus.acquire());
+    assertTrue(focus.acquire());
+    assertEquals(1, requests[0]);
+    focus.onFocusLost();
+    focus.onFocusLost();
+    assertEquals(1, interruptions[0]);
+    focus.release();
+    focus.release();
+    assertEquals(1, releases[0]);
+    assertFalse(focus.isAcquired());
+  }
+
+  @Test public void deniedSpeechAudioFocusPreventsPlaybackState() {
+    SpeechAudioFocusController focus = new SpeechAudioFocusController(
+        new SpeechAudioFocusController.AudioFocusPort() {
+          @Override public boolean request(Runnable onFocusLost) { return false; }
+          @Override public void abandon() { fail("Unacquired focus must not be abandoned"); }
+        }, () -> fail("Denied focus cannot interrupt playback"));
+    assertFalse(focus.acquire());
+    assertFalse(focus.isAcquired());
+    focus.release();
+  }
+
   @Test public void assistantStateMachineAcceptsVoiceAndRequestLifecycle() {
     AssistantStateMachine machine = new AssistantStateMachine();
     assertEquals(AssistantStateMachine.State.INITIALIZING, machine.state());
