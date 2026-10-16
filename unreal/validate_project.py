@@ -53,6 +53,21 @@ class UnrealProjectValidation(unittest.TestCase):
         self.assertNotIn("HttpModule", source)
         self.assertNotIn("FPlatformProcess::CreateProc", source)
 
+    def test_android_ipc_is_package_scoped_and_signature_protected(self):
+        bridge = (ROOT.parent / "android/app/src/main/java/dev/zeaz/ultimate/HumandroidRendererBridge.java").read_text()
+        manifest = (ROOT.parent / "android/app/src/main/AndroidManifest.xml").read_text()
+        upl = (PROJECT / "Source/ZEAZHumandroid/Humandroid_UPL.xml").read_text()
+        native = (PROJECT / "Source/ZEAZHumandroid/Private/ZEAZHumandroid.cpp").read_text()
+        self.assertIn('.setPackage(RENDERER_PACKAGE)', bridge)
+        self.assertIn('context.sendBroadcast(event, SIGNATURE_PERMISSION)', bridge)
+        self.assertIn('android:protectionLevel="signature"', manifest)
+        self.assertIn('addPermission android:name="dev.zeaz.ultimate.permission.HUMANDROID_RENDER_EVENT"', upl)
+        self.assertIn('registerReceiver(zeazStateReceiver, filter, ZEAZ_PERMISSION', upl)
+        self.assertIn('Context.RECEIVER_EXPORTED', upl)
+        self.assertIn('nativeHumandroidAssistantEvent', native)
+        self.assertIn('ENamedThreads::GameThread', native)
+        self.assertNotIn('Bearer ', native)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

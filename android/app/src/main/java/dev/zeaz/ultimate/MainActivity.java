@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -37,6 +38,7 @@ public final class MainActivity extends Activity {
     private EditText endpoint, token, input;
     private TextView status, output;
     private Button send, speak;
+    private Button openRenderer;
     private TextToSpeech tts;
     private JarvisHudView hud;
     private boolean busy = false;
@@ -50,6 +52,11 @@ public final class MainActivity extends Activity {
             ttsInitialized = result == TextToSpeech.SUCCESS;
             if (!destroyed && ttsInitialized && tts != null) {
                 speechReady = tts.setLanguage(new Locale("th", "TH")) >= TextToSpeech.LANG_AVAILABLE;
+                tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String utteranceId) { sendRendererState("SPEAKING"); }
+                    @Override public void onDone(String utteranceId) { sendRendererState("IDLE"); }
+                    @Override public void onError(String utteranceId) { sendRendererState("ERROR"); }
+                });
             }
         }));
         buildScreen();
@@ -188,11 +195,24 @@ public final class MainActivity extends Activity {
             }
             tts.speak(output.getText().toString(), TextToSpeech.QUEUE_FLUSH, null, "zeaz-response");
         });
+        addSpace(root, 10);
+        openRenderer = action("Open UE 3D Avatar", Color.rgb(22, 91, 112));
+        root.addView(openRenderer, new LinearLayout.LayoutParams(-1, dp(48)));
+        openRenderer.setOnClickListener(v -> {
+            try {
+                if (!HumandroidRendererBridge.launch(this, busy ? "THINKING" : "IDLE")) {
+                    Toast.makeText(this, "Install the Humandroid renderer app first", Toast.LENGTH_SHORT).show();
+                }
+            } catch (SecurityException ex) {
+                Toast.makeText(this, "Could not open the renderer. Check its install and signing configuration.", Toast.LENGTH_LONG).show();
+            }
+        });
         addSpace(root, 20);
         root.addView(text("Gateway credentials stay in memory for this session only. Requests use HTTPS.", 12, SUBTLE, false));
     }
 
     private void startVoice() {
+        sendRendererState("LISTENING");
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "th-TH");
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -200,14 +220,25 @@ public final class MainActivity extends Activity {
             startActivityForResult(intent, VOICE_REQUEST);
         } catch (Exception ex) {
             status.setText("●  Speech recognition unavailable");
+            sendRendererState("ERROR");
         }
     }
 
     private void setBusy(boolean value) {
         busy = value;
         if (hud != null) hud.setProcessing(value);
+        sendRendererState(value ? "THINKING" : "IDLE");
         send.setEnabled(!value);
         send.setAlpha(value ? 0.6f : 1f);
+    }
+
+    private void sendRendererState(String state) {
+        if (destroyed) return;
+        try {
+            HumandroidRendererBridge.sendState(this, state, 0.0f);
+        } catch (SecurityException ignored) {
+            // A missing or differently signed optional renderer must not block the native assistant.
+        }
     }
 
     private void ask() {
@@ -290,6 +321,9 @@ public final class MainActivity extends Activity {
         if (requestCode == VOICE_REQUEST && resultCode == RESULT_OK && data != null) {
             ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
             if (results != null && !results.isEmpty()) input.setText(results.get(0));
+            sendRendererState("IDLE");
+        } else if (requestCode == VOICE_REQUEST) {
+            sendRendererState("ERROR");
         }
     }
 

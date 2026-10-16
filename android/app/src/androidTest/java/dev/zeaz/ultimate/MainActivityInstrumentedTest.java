@@ -1,6 +1,7 @@
 package dev.zeaz.ultimate;
 
 import android.view.View;
+import android.content.Intent;
 import android.widget.EditText;
 import android.widget.TextView;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -25,6 +26,7 @@ public final class MainActivityInstrumentedTest {
             assertTrue(findText(root, "Send message"));
             assertTrue(findText(root, "Voice input"));
             assertTrue(findText(root, "AI RESPONSE"));
+            assertTrue(findText(root, "Open UE 3D Avatar"));
             assertTrue(hasView(root, JarvisHudView.class));
         });
     }
@@ -53,6 +55,35 @@ public final class MainActivityInstrumentedTest {
             hud.setProcessing(false);
             hud.setResumed(true);
         });
+    }
+
+    @Test public void rendererEventIsPackageScopedAndContainsOnlyVisualState() {
+        Intent event = HumandroidRendererBridge.createEventIntent(
+                "speaking", 0.4f, 17L);
+        assertEquals(HumandroidRendererBridge.ACTION_STATE, event.getAction());
+        assertEquals(HumandroidRendererBridge.RENDERER_PACKAGE, event.getPackage());
+        assertEquals(1, event.getIntExtra(HumandroidRendererBridge.EXTRA_VERSION, 0));
+        assertEquals("SPEAKING", event.getStringExtra(HumandroidRendererBridge.EXTRA_STATE));
+        assertEquals(0.4f, event.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0001f);
+        assertEquals(17L, event.getLongExtra(HumandroidRendererBridge.EXTRA_SEQUENCE, -1));
+        assertFalse(event.hasExtra("token"));
+        assertFalse(event.hasExtra("prompt"));
+        assertFalse(event.hasExtra("transcript"));
+    }
+
+    @Test public void rendererEventClampsAmplitudeAndNormalizesNonFiniteValues() {
+        Intent high = HumandroidRendererBridge.createEventIntent(
+                "LISTENING", 8.0f, 18L);
+        assertEquals(1.0f, high.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0f);
+        Intent invalid = HumandroidRendererBridge.createEventIntent(
+                "IDLE", Float.NaN, 19L);
+        assertEquals(0.0f, invalid.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0f);
+    }
+
+    @Test public void rendererEventRejectsUnknownStates() {
+        assertThrows(IllegalArgumentException.class, () ->
+                HumandroidRendererBridge.createEventIntent(
+                        "EXECUTE_COMMAND", 0.0f, 20L));
     }
 
     private static boolean findText(View root, String value) {

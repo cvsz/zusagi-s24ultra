@@ -40,3 +40,21 @@ python3 unreal/validate_project.py
 ```
 
 This validates project metadata and source invariants only. It is not a UE compile, Android package, rendering test, or device benchmark. Full acceptance still requires an editor/toolchain build, visual review, APK install, sustained target-device profiling, and a verified native integration path.
+
+## Native Android companion IPC
+
+The renderer is packaged as a separate Android application (`dev.zeaz.humandroid`). The native assistant can open it only from the visible **Open UE 3D Avatar** user action. While the native app is active, it may send the renderer a versioned visual event containing only an allowlisted state, normalized audio amplitude, and monotonic sequence number. Prompts, transcripts, access tokens, provider credentials, and zworkforce commands are never part of this protocol.
+
+The sender scopes each broadcast to the renderer package and requires the signature-level permission `dev.zeaz.ultimate.permission.HUMANDROID_RENDER_EVENT`. The Unreal receiver registers only while its GameActivity is resumed and queues accepted events to the Unreal game thread. A signature mismatch causes Android to withhold the permission and the broadcast is not delivered; Android provides no sender-side success acknowledgement in this one-way protocol. The Unreal UPL modifies the generated GameActivity and manifest; its generated Java/JNI integration must be compiled with the selected Unreal Engine installation before this interface is considered build-verified.
+
+### Signing requirement
+
+Android signature permissions are granted only when both APKs are signed by the same signing certificate. Local debug builds commonly use different debug keystores, so IPC will fail closed until both apps are configured to use the same authorized signing identity. Do not copy a production key into the repository or into the Unreal project. Configure signing through the organization's approved secret/signing system and verify certificate identity from the built APKs before device testing. This one-way bridge has no runtime acknowledgement for detecting mismatched certificates.
+
+The protocol is one-way and presentation-only. It is not an authentication mechanism for the assistant, a remote-control channel, or authorization to execute work. No live model or zworkforce integration is provided by this bridge.
+
+### Validation snapshot
+
+On 2026-10-16, the native Android application and instrumented tests compiled with the Windows Android SDK, and all 6 instrumented tests passed on a connected Samsung `SM-S948B` running Android 17. The first attempt exposed two ADB transports for that same device and the concurrent test sessions killed each other; disconnecting the duplicate transport and rerunning produced a clean pass. The repository Unreal static validator passed 6 tests, `make validate-template` passed, and its repository unit suite passed 13 tests.
+
+The physical-device run verified the native screen and state-intent contract only. Unreal Engine 5.8 Editor, UnrealBuildTool, RunUAT, and Epic Games Launcher were absent at validation time. Therefore the Unreal C++/UPL build, renderer APK, certificate alignment, cross-application broadcast delivery, 3D rendering, and UE device performance remain unverified.

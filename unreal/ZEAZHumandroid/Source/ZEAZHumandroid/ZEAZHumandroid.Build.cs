@@ -8,5 +8,10 @@ public class ZEAZHumandroid : ModuleRules
         PublicDependencyModuleNames.AddRange(new[] {
             "Core", "CoreUObject", "Engine", "InputCore", "ProceduralMeshComponent"
         });
+        if (Target.Platform == UnrealTargetPlatform.Android)
+        {
+            string PluginPath = Utils.MakePathRelativeTo(ModuleDirectory, Target.RelativeEnginePath);
+            AdditionalPropertiesForReceipt.Add("AndroidPlugin", System.IO.Path.Combine(PluginPath, "Humandroid_UPL.xml"));
+        }
     }
 }
