@@ -72,5 +72,5 @@ At the time this record is written, all six supplied videos were reviewed and th
 - `:app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest :app:connectedDebugAndroidTest` passed; the Samsung `SM-S948B` (Android 17/API 37) ran all 14 instrumentation tests with 0 failures and 0 skips, including SSE parser order, termination, and size checks.
 - Lint reported 13 existing warnings (target/compile SDK, dependency freshness, and hard-coded UI strings), with no lint errors.
 - Debug APK `dev.zeaz.ultimate.s26smoke` was installed and launched. The Activity was observed resumed and the captured log window contained no fatal exception. The display was dozing during earlier inspection; no manual live Gateway stream or speech interaction was performed.
-- Debug APK SHA-256: `9b37c645a30954ac6d71550cd55543d633b34c55c3e0d0861b777a1b55942638`. Android test APK SHA-256: `e1f9c5552bb001f4637b73009809224b8aba7031ef5e818fa592bc34a24bcc5e`.
+- Debug APK SHA-256: `f798a7399e60bf8d4b4ff1fa2ecfa56636903df3252f96b9f535dcfaa7efef42`. Android test APK SHA-256: `e1f9c5552bb001f4637b73009809224b8aba7031ef5e818fa592bc34a24bcc5e`.
 - SSE v1 implementation remains in the feature worktree until signed commit, exact-head CI, and independent review complete.
