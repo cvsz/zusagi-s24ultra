@@ -1,31 +1,32 @@
 # zusagi-s26ultra
 
-ZEAZDEV Super Intelligence for Samsung Galaxy S24 Ultra
+## ZEAZ Ultimate Ollama Gateway — development pilot
 
-## Status
+A standalone local gateway for `POST /v1/chat`, returning `{"reply":"..."}`. Uses Ollama at `127.0.0.1:11434`, with a bounded request body, constant-time bearer-token comparison, two concurrent upstream requests, and no device-side provider credentials. No third-party Python packages.
 
-Project scaffold initialized from ztemplate. Application code, runtime CI, deployment, observability, and recovery must be implemented and validated before a production release.
+## Start on the server hosting Ollama
 
-## Getting started
+```bash
+read -rsp 'Choose a long device token: ' ZEAZ_GATEWAY_TOKEN; echo
+export ZEAZ_GATEWAY_TOKEN
+export ZEAZ_AI_MODEL=qwen2.5-coder:3b
+python3 ollama_gateway.py
+```
 
-1. Read [Startup guide](docs/startup.md) and complete [Implementation Checklist](IMPLEMENTATION-CHECKLIST.md).
-2. Set language/runtime and package manager. Replace placeholder Makefile and Dockerfile with actual implementation or remove them.
-3. Copy .env.example to .env and configure local-only, non-secret settings. Never commit .env.
-4. Add application code, tests, CI and security scanners applicable to your stack.
-5. Define ownership in .github/CODEOWNERS and SECURITY.md, then configure repository rulesets.
+In a separate terminal:
 
-## Architecture and operations
+```bash
+curl -i http://127.0.0.1:8765/health
+read -rsp 'Device token: ' ZEAZ_GATEWAY_TOKEN; echo
+curl -i --max-time 180 http://127.0.0.1:8765/v1/chat \
+  -H "Authorization: Bearer $ZEAZ_GATEWAY_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"สวัสดี ZEAZ Ultimate"}'
+unset ZEAZ_GATEWAY_TOKEN
+```
 
-- [Architecture](docs/architecture.md)
-- [Development](docs/development.md)
-- [Release](docs/release.md)
-- [Startup decisions](docs/startup.md)
-- [Cloudflare/DNS ownership contract](docs/cloudflare-terraform.md)
+## HTTPS and phone access
 
-## Security
+Do not expose port 8765 to the LAN or Internet. The listener is loopback-only. If Android access is needed, configure a dedicated authenticated HTTPS route such as `https://YOUR_GATEWAY_HOST` through a trusted reverse proxy, forwarding only the required gateway paths to `http://127.0.0.1:8765`. Verify the hostname, TLS, routing and authentication before setting Android's gateway URL to that HTTPS origin. Protect the route with per-device authorization, rate limits, access logs without secrets, and abuse controls.
 
-Report vulnerabilities through [GitHub security](https://github.com/cvsz/zusagi-s24ultra/security) or the private channel documented in [SECURITY.md](SECURITY.md). Never include vulnerabilities or credentials in public issues.
-
-## License
-
-Review LICENSE copyright and choose a license before your first release. Template source retains the original copyright attribution where legally required.
+This is **not production-ready**: static shared bearer token, no per-device revocation/expiry, no persistent rate limiting, no robust graceful shutdown, no observability, no automated integration tests. Rotate credentials before any public pilot. Keep tokens outside git, shell history, screenshots and log output. Run behind a supervised service after validation. Open WebUI remains unchanged.

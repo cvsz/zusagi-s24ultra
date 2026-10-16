@@ -1,144 +1,387 @@
 package dev.zeaz.ultimate;
 
-import android.view.View;
+import android.app.Activity;
 import android.content.Intent;
-import android.widget.EditText;
+import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.ColorDrawable;
+import android.os.Build;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.TextView;
+import android.widget.Button;
+import android.widget.EditText;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.rule.ActivityTestRule;
-import org.junit.Rule;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 @RunWith(AndroidJUnit4.class)
 public final class MainActivityInstrumentedTest {
-    @Rule public ActivityTestRule<MainActivity> activity =
-            new ActivityTestRule<>(MainActivity.class);
+  @Test public void rendererIpcIsPackageScopedAndCarriesOnlyBoundedVisualState() {
+    Intent event = HumandroidRendererBridge.createEventIntent("speaking", 0.4f, 17L);
+    assertEquals(HumandroidRendererBridge.ACTION_STATE, event.getAction());
+    assertEquals(HumandroidRendererBridge.RENDERER_PACKAGE, event.getPackage());
+    assertEquals(1, event.getIntExtra(HumandroidRendererBridge.EXTRA_VERSION, 0));
+    assertEquals("SPEAKING", event.getStringExtra(HumandroidRendererBridge.EXTRA_STATE));
+    assertEquals(0.4f, event.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0001f);
+    assertEquals(17L, event.getLongExtra(HumandroidRendererBridge.EXTRA_SEQUENCE, -1));
+    assertFalse(event.hasExtra("token"));
+    assertFalse(event.hasExtra("prompt"));
+    assertFalse(event.hasExtra("transcript"));
+  }
 
-    @Test public void launchShowsChatControlsAndHud() {
-        MainActivity screen = activity.getActivity();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            View root = screen.getWindow().getDecorView();
-            assertNotNull(root);
-            assertTrue(findText(root, "Your AI companion"));
-            assertTrue(findText(root, "Send message"));
-            assertTrue(findText(root, "Voice input"));
-            assertTrue(findText(root, "AI RESPONSE"));
-            assertTrue(findText(root, "Open UE 3D Avatar"));
-            assertTrue(hasView(root, JarvisHudView.class));
-        });
+  @Test public void rendererIpcClampsAmplitudeAndRejectsUnknownStates() {
+    Intent high = HumandroidRendererBridge.createEventIntent("LISTENING", 8.0f, 18L);
+    assertEquals(1.0f, high.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0f);
+    Intent invalid = HumandroidRendererBridge.createEventIntent("IDLE", Float.NaN, 19L);
+    assertEquals(0.0f, invalid.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0f);
+    try {
+      HumandroidRendererBridge.createEventIntent("EXECUTE_COMMAND", 0.0f, 20L);
+      fail("Unknown renderer states must be rejected");
+    } catch (IllegalArgumentException expected) {
+      assertTrue(expected.getMessage().contains("state"));
     }
+  }
 
-    @Test public void invalidGatewayDoesNotStartNetworkRequest() {
-        MainActivity screen = activity.getActivity();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            View root = screen.getWindow().getDecorView();
-            EditText endpoint = findEdit(root, "https://your-gateway.example.com");
-            assertNotNull(endpoint);
-            endpoint.setText("http://127.0.0.1:8765");
-            View send = findButton(root, "Send message");
-            assertNotNull(send);
-            send.performClick();
-            assertTrue(findText(root, "●  Enter a valid HTTPS gateway origin"));
-        });
-    }
+  @Test public void speechAudioFocusIsAcquiredReleasedAndInterruptsOnce() {
+    final int[] requests = {0}, releases = {0}, interruptions = {0};
+    SpeechAudioFocusController.AudioFocusPort port = new SpeechAudioFocusController.AudioFocusPort() {
+      @Override public boolean request(Runnable onFocusLost) { requests[0]++; return true; }
+      @Override public void abandon() { releases[0]++; }
+    };
+    SpeechAudioFocusController focus = new SpeechAudioFocusController(port, () -> interruptions[0]++);
+    assertTrue(focus.acquire());
+    assertTrue(focus.acquire());
+    assertEquals(1, requests[0]);
+    focus.onFocusLost();
+    focus.onFocusLost();
+    assertEquals(1, interruptions[0]);
+    focus.release();
+    focus.release();
+    assertEquals(1, releases[0]);
+    assertFalse(focus.isAcquired());
+  }
 
-    @Test public void hudLifecycleTogglesWithoutCrash() {
-        MainActivity screen = activity.getActivity();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-            JarvisHudView hud = findHud(screen.getWindow().getDecorView());
-            assertNotNull(hud);
-            hud.setProcessing(true);
-            hud.setResumed(false);
-            hud.setProcessing(false);
-            hud.setResumed(true);
-        });
-    }
+  @Test public void deniedSpeechAudioFocusPreventsPlaybackState() {
+    SpeechAudioFocusController focus = new SpeechAudioFocusController(
+        new SpeechAudioFocusController.AudioFocusPort() {
+          @Override public boolean request(Runnable onFocusLost) { return false; }
+          @Override public void abandon() { fail("Unacquired focus must not be abandoned"); }
+        }, () -> fail("Denied focus cannot interrupt playback"));
+    assertFalse(focus.acquire());
+    assertFalse(focus.isAcquired());
+    focus.release();
+  }
 
-    @Test public void rendererEventIsPackageScopedAndContainsOnlyVisualState() {
-        Intent event = HumandroidRendererBridge.createEventIntent(
-                "speaking", 0.4f, 17L);
-        assertEquals(HumandroidRendererBridge.ACTION_STATE, event.getAction());
-        assertEquals(HumandroidRendererBridge.RENDERER_PACKAGE, event.getPackage());
-        assertEquals(1, event.getIntExtra(HumandroidRendererBridge.EXTRA_VERSION, 0));
-        assertEquals("SPEAKING", event.getStringExtra(HumandroidRendererBridge.EXTRA_STATE));
-        assertEquals(0.4f, event.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0001f);
-        assertEquals(17L, event.getLongExtra(HumandroidRendererBridge.EXTRA_SEQUENCE, -1));
-        assertFalse(event.hasExtra("token"));
-        assertFalse(event.hasExtra("prompt"));
-        assertFalse(event.hasExtra("transcript"));
-    }
+  @Test public void assistantStreamParserDeliversOrderedDeltasAndRequiresDone() throws Exception {
+    String events = "event: delta\ndata: {\"sequence\":0,\"text\":\"สวัสดี \"}\n\n"
+        + "event: delta\ndata: {\"sequence\":1,\"text\":\"โลก\"}\n\n"
+        + "event: done\ndata: {\"sequence\":2}\n\n";
+    StringBuilder answer = new StringBuilder();
+    int count = AssistantStreamParser.parse(
+        new ByteArrayInputStream(events.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        answer::append);
+    assertEquals("สวัสดี โลก", answer.toString());
+    assertEquals(2, count);
+  }
 
-    @Test public void rendererEventClampsAmplitudeAndNormalizesNonFiniteValues() {
-        Intent high = HumandroidRendererBridge.createEventIntent(
-                "LISTENING", 8.0f, 18L);
-        assertEquals(1.0f, high.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0f);
-        Intent invalid = HumandroidRendererBridge.createEventIntent(
-                "IDLE", Float.NaN, 19L);
-        assertEquals(0.0f, invalid.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0f);
-    }
+  @Test public void assistantStreamParserRejectsOutOfOrderAndUnterminatedEvents() throws Exception {
+    assertStreamRejected("event: delta\ndata: {\"sequence\":1,\"text\":\"gap\"}\n\n"
+        + "event: done\ndata: {\"sequence\":2}\n\n");
+    assertStreamRejected("event: delta\ndata: {\"sequence\":0,\"text\":\"partial\"}\n\n");
+  }
 
-    @Test public void rendererEventRejectsUnknownStates() {
-        assertThrows(IllegalArgumentException.class, () ->
-                HumandroidRendererBridge.createEventIntent(
-                        "EXECUTE_COMMAND", 0.0f, 20L));
-    }
+  @Test public void assistantStreamParserBoundsLineAndTotalBytes() throws Exception {
+    assertStreamRejected("event: delta\ndata: {\"sequence\":0,\"text\":\""
+        + repeat('x', 17000) + "\"}\n\n");
+  }
 
-    private static boolean findText(View root, String value) {
-        if (root instanceof TextView && value.equals(((TextView) root).getText().toString())) return true;
-        if (root instanceof android.view.ViewGroup) {
-            android.view.ViewGroup group = (android.view.ViewGroup) root;
-            for (int i = 0; i < group.getChildCount(); i++)
-                if (findText(group.getChildAt(i), value)) return true;
-        }
-        return false;
+  @Test public void assistantStreamParserEnforcesTotalDuration() throws Exception {
+    long[] elapsed = {0};
+    ByteArrayInputStream slow = new ByteArrayInputStream(new byte[] {'x'}) {
+      @Override public synchronized int read() {
+        elapsed[0] = 11;
+        return super.read();
+      }
+    };
+    try {
+      AssistantStreamParser.parse(slow, ignored -> {}, () -> elapsed[0], 10);
+      fail("Slow stream must exceed its total duration");
+    } catch (IOException expected) {
+      assertTrue(expected.getMessage().contains("duration"));
     }
+  }
 
-    private static boolean hasView(View root, Class<?> type) {
-        if (type.isInstance(root)) return true;
-        if (root instanceof android.view.ViewGroup) {
-            android.view.ViewGroup group = (android.view.ViewGroup) root;
-            for (int i = 0; i < group.getChildCount(); i++)
-                if (hasView(group.getChildAt(i), type)) return true;
-        }
-        return false;
+  private static void assertStreamRejected(String stream) throws Exception {
+    try {
+      AssistantStreamParser.parse(new ByteArrayInputStream(
+          stream.getBytes(java.nio.charset.StandardCharsets.UTF_8)), ignored -> {});
+      fail("Malformed or incomplete stream must be rejected");
+    } catch (IOException expected) {
+      assertTrue(expected.getMessage().contains("stream"));
     }
+  }
 
-    private static JarvisHudView findHud(View root) {
-        if (root instanceof JarvisHudView) return (JarvisHudView) root;
-        if (root instanceof android.view.ViewGroup) {
-            android.view.ViewGroup group = (android.view.ViewGroup) root;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                JarvisHudView found = findHud(group.getChildAt(i));
-                if (found != null) return found;
-            }
-        }
-        return null;
-    }
+  private static String repeat(char value, int count) {
+    StringBuilder result = new StringBuilder(count);
+    for (int index = 0; index < count; index++) result.append(value);
+    return result.toString();
+  }
 
-    private static EditText findEdit(View root, String hint) {
-        if (root instanceof EditText && hint.contentEquals(((EditText) root).getHint())) return (EditText) root;
-        if (root instanceof android.view.ViewGroup) {
-            android.view.ViewGroup group = (android.view.ViewGroup) root;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                EditText found = findEdit(group.getChildAt(i), hint);
-                if (found != null) return found;
-            }
-        }
-        return null;
-    }
+  @Test public void assistantStateMachineAcceptsVoiceAndRequestLifecycle() {
+    AssistantStateMachine machine = new AssistantStateMachine();
+    assertEquals(AssistantStateMachine.State.INITIALIZING, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.INITIALIZATION_COMPLETE));
+    assertEquals(AssistantStateMachine.State.DISCONNECTED, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.LISTENING_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.TRANSCRIPTION_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.TRANSCRIPTION_COMPLETED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.REQUEST_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.STREAM_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.RESPONSE_COMPLETED));
+    assertEquals(AssistantStateMachine.State.IDLE, machine.state());
+  }
 
-    private static View findButton(View root, String label) {
-        if (root instanceof android.widget.Button && label.contentEquals(((android.widget.Button) root).getText())) return root;
-        if (root instanceof android.view.ViewGroup) {
-            android.view.ViewGroup group = (android.view.ViewGroup) root;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                View found = findButton(group.getChildAt(i), label);
-                if (found != null) return found;
-            }
-        }
-        return null;
+  @Test public void assistantStateMachineRejectsIllegalTransitionsAndRestoresPausedWork() {
+    AssistantStateMachine machine = new AssistantStateMachine();
+    assertFalse(machine.transition(AssistantStateMachine.Event.REQUEST_STARTED));
+    assertEquals(AssistantStateMachine.State.INITIALIZING, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.INITIALIZATION_COMPLETE));
+    assertTrue(machine.transition(AssistantStateMachine.Event.REQUEST_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.PAUSE));
+    assertEquals(AssistantStateMachine.State.PAUSED, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.RESPONSE_COMPLETED));
+    assertEquals(AssistantStateMachine.State.PAUSED, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.RESUME));
+    assertEquals(AssistantStateMachine.State.IDLE, machine.state());
+  }
+
+  @Test public void activityUsesDarkViewportAndReadableHeader() throws Exception {
+    Intent intent = new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(), MainActivity.class);
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    Activity activity = InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
+    InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    try {
+      View viewport = findTag(activity.getWindow().getDecorView(), "zeaz:viewport");
+      View content = findTag(activity.getWindow().getDecorView(), "zeaz:content");
+      View title = findTag(activity.getWindow().getDecorView(), "zeaz:title");
+      assertNotNull("The scrollable app viewport must be present", viewport);
+      assertNotNull("The app content root must be present", content);
+      assertNotNull("The app title must be present", title);
+      assertEquals(Color.rgb(10, 15, 27), backgroundColor(viewport));
+      assertEquals(Color.rgb(10, 15, 27), backgroundColor(content));
+      assertEquals("Your AI companion", ((TextView) title).getText().toString());
+      assertFalse("The title must not display an escaped newline",
+          ((TextView) title).getText().toString().contains("\\n"));
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+          && activity.getWindow().getDecorView().hasWindowFocus()) {
+        assertTrue("System bar insets must move content below the status bar",
+            viewport.getPaddingTop() > 0);
+      }
+    } finally {
+      activity.finish();
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
+  }
+
+  @Test public void analysisRejectsIncompleteScoreObjects() throws Exception {
+    try {
+      IntelligenceClient.formatResponse(
+          "{\"scores\":{\"risk\":0},\"action\":\"HOLD\",\"rug_risk\":\"LOW\"}",
+          "ZEAZ", "testnet");
+      fail("Missing score values must not be presented as zero");
+    } catch (IllegalArgumentException expected) {
+      assertEquals("Invalid score: opportunity", expected.getMessage());
+    }
+  }
+
+  @Test public void analysisFormatsCompleteNumericScores() throws Exception {
+    String result = IntelligenceClient.formatResponse(
+        "{\"scores\":{\"opportunity\":12,\"risk\":34,\"confidence\":56},"
+            + "\"action\":\"HOLD\",\"rug_risk\":\"LOW\"}",
+        "ZEAZ", "testnet");
+    assertTrue(result.contains("Opportunity 12"));
+    assertTrue(result.contains("Risk 34"));
+    assertTrue(result.contains("Confidence 56"));
+    assertTrue(result.contains("Decision: HOLD"));
+  }
+
+  @Test public void analysisRejectsNonTextDecisionLabels() throws Exception {
+    try {
+      IntelligenceClient.formatResponse(
+          "{\"scores\":{\"opportunity\":12,\"risk\":34,\"confidence\":56},"
+              + "\"action\":7,\"rug_risk\":\"LOW\"}",
+          "ZEAZ", "testnet");
+      fail("A non-text decision label must not be rendered");
+    } catch (IllegalArgumentException expected) {
+      assertEquals("Invalid field: action", expected.getMessage());
+    }
+  }
+
+  @Test public void analysisResponseSizeIsBounded() throws Exception {
+    byte[] body = new byte[9];
+    try {
+      IntelligenceClient.readBounded(new ByteArrayInputStream(body), 8);
+      fail("Oversized response must be rejected");
+    } catch (IOException expected) {
+      assertEquals("Response too large", expected.getMessage());
+    }
+  }
+
+  @Test public void humanoidHudRendersOriginalCyanAndGoldContours() {
+    JarvisHudView hud = new JarvisHudView(InstrumentationRegistry.getInstrumentation().getTargetContext());
+    hud.setState(JarvisHudView.State.IDLE);
+    hud.measure(View.MeasureSpec.makeMeasureSpec(340, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(220, View.MeasureSpec.EXACTLY));
+    hud.layout(0, 0, 340, 220);
+    hud.setResumed(false);
+    Bitmap bitmap = Bitmap.createBitmap(340, 220, Bitmap.Config.ARGB_8888);
+    hud.draw(new Canvas(bitmap));
+    int cyanPixels = 0;
+    int goldPixels = 0;
+    for (int y = 0; y < bitmap.getHeight(); y++) {
+      for (int x = 0; x < bitmap.getWidth(); x++) {
+        int pixel = bitmap.getPixel(x, y);
+        int red = Color.red(pixel), green = Color.green(pixel), blue = Color.blue(pixel);
+        if (blue > 190 && green > 130 && red < 130) cyanPixels++;
+        if (red > 180 && green > 105 && green < 230 && blue > 35 && blue < 160) goldPixels++;
+      }
+    }
+    bitmap.recycle();
+    assertTrue("The HUD should draw cyan humanoid contours", cyanPixels > 100);
+    assertTrue("The HUD should draw gold facial contours", goldPixels > 10);
+  }
+
+  @Test public void humanoidPoseChangesOverTime() {
+    float initialPose = JarvisHudView.HumanoidMesh.headYawAt(0f, JarvisHudView.State.IDLE);
+    float laterPose = JarvisHudView.HumanoidMesh.headYawAt(2f, JarvisHudView.State.IDLE);
+    assertTrue("The avatar should change its head pose over time",
+        Math.abs(laterPose - initialPose) > 0.05f);
+    float listeningPose = JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.LISTENING);
+    float thinkingPose = JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.THINKING);
+    assertTrue("Listening and thinking should have distinct motion profiles",
+        Math.abs(listeningPose - thinkingPose) > 0.05f);
+  }
+
+  @Test public void humanoidHudUsesStableFrameWhenReducedMotionIsEnabled() throws Exception {
+    JarvisHudView hud = new JarvisHudView(InstrumentationRegistry.getInstrumentation().getTargetContext());
+    hud.measure(View.MeasureSpec.makeMeasureSpec(340, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(220, View.MeasureSpec.EXACTLY));
+    hud.layout(0, 0, 340, 220);
+    hud.setReducedMotionEnabled(true);
+    hud.setResumed(false);
+    Bitmap first = Bitmap.createBitmap(340, 220, Bitmap.Config.ARGB_8888);
+    Bitmap second = Bitmap.createBitmap(340, 220, Bitmap.Config.ARGB_8888);
+    hud.draw(new Canvas(first));
+    Thread.sleep(80);
+    hud.draw(new Canvas(second));
+    int[] firstPixels = new int[340 * 220], secondPixels = new int[340 * 220];
+    first.getPixels(firstPixels, 0, 340, 0, 0, 340, 220);
+    second.getPixels(secondPixels, 0, 340, 0, 0, 340, 220);
+    first.recycle();
+    second.recycle();
+    assertTrue("Reduced motion should render an identical frame over time",
+        java.util.Arrays.equals(firstPixels, secondPixels));
+  }
+
+  @Test public void humanoidHudChangesPosePaletteAndAccessibleStateByAssistantState() {
+    JarvisHudView hud = new JarvisHudView(InstrumentationRegistry.getInstrumentation().getTargetContext());
+    assertTrue(hud.getContentDescription().toString().startsWith("ZEAZ AI status: idle"));
+    hud.setState(JarvisHudView.State.LISTENING);
+    assertTrue(hud.getContentDescription().toString().startsWith("ZEAZ AI status: listening"));
+    assertEquals(JarvisHudView.State.LISTENING, hud.getState());
+    assertTrue(JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.LISTENING)
+        != JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.THINKING));
+  }
+
+  @Test public void workflowSequenceValidatesDependenciesAndPreviewsStableOrder() {
+    WorkflowSequenceModel model = new WorkflowSequenceModel();
+    model.add("review", "Review", java.util.Arrays.asList("build"));
+    model.add("build", "Build", java.util.Collections.emptyList());
+    assertTrue(model.validate().isValid());
+    assertEquals(java.util.Arrays.asList("build", "review"), model.previewOrder());
+  }
+
+  @Test public void workflowSequenceRejectsUnknownDependenciesAndCycles() {
+    WorkflowSequenceModel unknown = new WorkflowSequenceModel();
+    unknown.add("review", "Review", java.util.Arrays.asList("missing"));
+    assertFalse(unknown.validate().isValid());
+    WorkflowSequenceModel cycle = new WorkflowSequenceModel();
+    cycle.add("one", "One", java.util.Arrays.asList("two"));
+    cycle.add("two", "Two", java.util.Arrays.asList("one"));
+    assertFalse(cycle.validate().isValid());
+  }
+
+  @Test public void activityExposesVoiceStatusReducedMotionAndPreviewOnlyWorkflow() {
+    Intent intent = new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(), MainActivity.class);
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    Activity activity = InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
+    InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    try {
+      assertNotNull(findTag(activity.getWindow().getDecorView(), "zeaz:speech-status"));
+      assertNotNull(findTag(activity.getWindow().getDecorView(), "zeaz:reduced-motion"));
+      assertNotNull(findTag(activity.getWindow().getDecorView(), "zeaz:open-renderer"));
+      EditText title = (EditText) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-title");
+      assertNotNull(title);
+      activity.runOnUiThread(() -> {
+        title.setText("Plan only");
+        ((Button) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-add")).performClick();
+        ((Button) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-preview")).performClick();
+      });
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+      TextView result = (TextView) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-result");
+      assertTrue(result.getText().toString().contains("not executed"));
+    } finally {
+      activity.finish();
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    }
+  }
+
+  @Test public void physicalDeviceReportsThaiTtsInitializationOutcome() throws Exception {
+    Intent intent = new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(), MainActivity.class);
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    Activity activity = InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
+    try {
+      TextView speech = (TextView) findTag(activity.getWindow().getDecorView(), "zeaz:speech-status");
+      assertNotNull(speech);
+      long deadline = android.os.SystemClock.uptimeMillis() + 8000;
+      while (speech.getText().toString().contains("Initializing")
+          && android.os.SystemClock.uptimeMillis() < deadline) {
+        Thread.sleep(100);
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+      }
+      assertFalse("TTS initialization must resolve to ready or a visible unavailable state",
+          speech.getText().toString().contains("Initializing"));
+      assertTrue(speech.getText().toString().contains("text-to-speech"));
+    } finally {
+      activity.finish();
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    }
+  }
+
+  private static int backgroundColor(View view) {
+    assertTrue("Expected a solid-color background", view.getBackground() instanceof ColorDrawable);
+    return ((ColorDrawable) view.getBackground()).getColor();
+  }
+
+  private static View findTag(View view, String tag) {
+    if (tag.equals(view.getTag())) return view;
+    if (view instanceof ViewGroup) {
+      ViewGroup group = (ViewGroup) view;
+      for (int index = 0; index < group.getChildCount(); index++) {
+        View match = findTag(group.getChildAt(index), tag);
+        if (match != null) return match;
+      }
+    }
+    return null;
+  }
 }
