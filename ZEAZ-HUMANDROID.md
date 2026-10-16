@@ -25,6 +25,10 @@ The repository currently contains a native Java Android screen, an animated Canv
 
 The repository’s Gateway currently implements a chat route, not the Android advisory `/v1/analyze` contract. The client’s HTTPS and redirect checks do not substitute for a verified server-side authentication, authorization, rate-limit, tenant-isolation, or network-egress design. Do not configure this client against a public service until those controls and the endpoint contract are independently verified.
 
+### zworkforce contract investigation
+
+A local zworkforce source snapshot documents `GET /v1/tasks` and `GET /v1/tasks/{id}`. Those routes require trusted-edge headers containing a fixed owner ID and `ZARVIS_EDGE_SHARED_SECRET`; its README says the secret must be at least 32 bytes and must never reach the browser. The snapshot describes a single-owner runtime, not a tenant-scoped device API. No verified deployment URL, TLS edge configuration, device identity mapping, or per-device authorization contract was available. The Android app must not receive the edge secret, and proxying owner-wide task data behind the current shared Gateway token would broaden access. Therefore no zworkforce connection or command dashboard is enabled; read-only integration remains blocked until an authenticated server-side identity mapping and deployment contract are verified.
+
 ## Trust boundaries and implementation constraints
 
 - Keep model/provider credentials on a server; never embed them in an APK.
