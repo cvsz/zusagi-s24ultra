@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+  <androidManifestUpdates>
+    <addPermission android:name="dev.zeaz.ultimate.permission.HUMANDROID_RENDER_EVENT" />
+  </androidManifestUpdates>
+  <gameActivityImportAdditions>
+    <insert>
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
+import android.os.Bundle;
+    </insert>
+  </gameActivityImportAdditions>
+  <gameActivityClassAdditions>
+    <insert>
+private static final String ZEAZ_ACTION = "dev.zeaz.ultimate.HUMANDROID_STATE";
+private static final String ZEAZ_PERMISSION = "dev.zeaz.ultimate.permission.HUMANDROID_RENDER_EVENT";
+private BroadcastReceiver zeazStateReceiver;
+private boolean zeazReceiverRegistered = false;
+
+private native void nativeHumandroidAssistantEvent(String state, float amplitude, long sequence);
+
+private void zeazDispatchState(Intent intent) {
+    if (intent == null || !ZEAZ_ACTION.equals(intent.getAction())
+            || intent.getIntExtra("protocol_version", 0) != 1) return;
+    String state = intent.getStringExtra("visual_state");
+    if (state == null || !(state.equals("IDLE") || state.equals("LISTENING")
+            || state.equals("THINKING") || state.equals("STREAMING") || state.equals("SPEAKING")
+            || state.equals("ERROR") || state.equals("DISCONNECTED"))) return;
+    float amplitude = intent.getFloatExtra("audio_amplitude", 0.0f);
+    if (Float.isNaN(amplitude) || Float.isInfinite(amplitude)) amplitude = 0.0f;
+    amplitude = Math.max(0.0f, Math.min(1.0f, amplitude));
+    long sequence = intent.getLongExtra("sequence", 0L);
+    if (sequence &lt;= 0L) return;
+    nativeHumandroidAssistantEvent(state, amplitude, sequence);
+}
+
+private void zeazRegisterStateReceiver() {
+    if (zeazReceiverRegistered) return;
+    zeazStateReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            zeazDispatchState(intent);
+        }
+    };
+    IntentFilter filter = new IntentFilter(ZEAZ_ACTION);
+    if (Build.VERSION.SDK_INT &gt;= 33) {
+        registerReceiver(zeazStateReceiver, filter, ZEAZ_PERMISSION, null, Context.RECEIVER_EXPORTED);
+    } else {
+        registerReceiver(zeazStateReceiver, filter, ZEAZ_PERMISSION, null);
+    }
+    zeazReceiverRegistered = true;
+    zeazDispatchState(getIntent());
+}
+
+private void zeazUnregisterStateReceiver() {
+    if (!zeazReceiverRegistered) return;
+    unregisterReceiver(zeazStateReceiver);
+    zeazReceiverRegistered = false;
+    zeazStateReceiver = null;
+}
+    </insert>
+  </gameActivityClassAdditions>
+  <gameActivityOnResumeAdditions>
+    <insert>zeazRegisterStateReceiver();</insert>
+  </gameActivityOnResumeAdditions>
+  <gameActivityOnPauseAdditions>
+    <insert>zeazUnregisterStateReceiver();</insert>
+  </gameActivityOnPauseAdditions>
+  <gameActivityOnNewIntentAdditions>
+    <insert>
+setIntent(intent);
+zeazDispatchState(intent);
+    </insert>
+  </gameActivityOnNewIntentAdditions>
+</root>
