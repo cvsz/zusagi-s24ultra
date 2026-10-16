@@ -8,7 +8,11 @@ This is a no-root Android client foundation, not AGI. The existing repository is
 - HTTPS-only API communication, per-session bearer token input; token is deliberately not persisted.
 - Android built-in voice recognition intent and Thai speech synthesis; voice recognition availability depends on installed services.
 - No Accessibility service, device admin, root, unrestricted shell execution, or background surveillance.
-- The client expects POST /v1/chat with JSON `{"message":"..."}` and a JSON `{"reply":"..."}` response.
+- Chat expects POST `/v1/chat` with JSON `{"message":"..."}` and a JSON `{"reply":"..."}` response.
+
+The separate **Analyze Token (Advisory)** action accepts `chain:symbol:address` in the message field and sends POST `/v1/analyze` with `{"token":{"chain":"...","symbol":"...","address":"..."}}`. It sends the session-only device bearer token, follows no redirects, and expects an object containing numeric `scores.opportunity`, `scores.risk`, and `scores.confidence` plus non-empty string `action` and `rug_risk` fields. A malformed or oversized response is rejected rather than displayed as zero-valued scores. This action is read-only decision support: it does not place trades, submit orders, or mutate wallet state.
+
+The gateway implemented in this repository is chat-only and does not provide `/v1/analyze`. Both actions share one configured HTTPS origin, so a deployment needs a separately reviewed router that sends each path to the correct service. The Android bearer header alone is not proof that the analysis service authenticates it. Do not publish the analyzer route unless server-side authentication, authorization, tenant isolation, rate limits, and safe error handling are independently verified. The device token remains session-only and must not be reused as a provider credential.
 
 ## Server contract and planned integrations
 ZEAZDEV must host an independently authenticated gateway, add per-device authorization, rate limits, request-size bounds, replay controls and redacted audit logging. Multi-agent orchestration, memory, task execution and Android automation are **not implemented by this mobile foundation**.
@@ -20,7 +24,7 @@ Recommended backend modules:
 - Voice transport alternatives for low latency
 
 ## Build
-From `android/`, with JDK 17, Android SDK 35 and Gradle 8.9 installed:
+From `android/`, with JDK 17, Android SDK 35 and Gradle 8.14.5 installed:
 ```bash
 gradle :app:assembleDebug
 ```

@@ -1,6 +1,6 @@
 # ZEAZ Ultimate Gateway MVP
 
-This is an initial **chat-only AI assistant vertical slice**, not a production-ready multi-agent system. It implements the existing Android `POST /v1/chat` contract. No external tools, device commands, repository mutations, background execution, or memory are enabled.
+This is an initial **chat-only AI assistant vertical slice**, not a production-ready multi-agent system. It implements the Android `POST /v1/chat` contract. The Android app also has a separate read-only token-advisory action, but this gateway does not implement `POST /v1/analyze`; configure a separately reviewed service and authenticated router before using that action. No external tools, device commands, repository mutations, background execution, or memory are enabled.
 
 ## Local setup
 
@@ -28,6 +28,8 @@ Android configuration:
 - Gateway URL: your verified HTTPS origin, without `/v1/chat`
 - Device token: the separately provisioned `ZEAZ_GATEWAY_TOKEN`
 - Send: `POST /v1/chat` with `{"message":"..."}`, response `{"reply":"..."}`
+
+The token-advisory action sends `POST /v1/analyze` with `{"token":{"chain":"...","symbol":"...","address":"..."}}` and a bearer device token. The Android client rejects redirects, limits responses to 256 KiB, and requires numeric `opportunity`, `risk`, and `confidence` values plus non-empty `action` and `rug_risk` strings. These client checks do not authenticate or secure the analysis service. The gateway in this repository has no `/v1/analyze` route; do not expose an external analyzer publicly until its authentication, authorization, rate limits, tenant isolation, and routing have been verified independently.
 
 ## Limitations and release gates
 

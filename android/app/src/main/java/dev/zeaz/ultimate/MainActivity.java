@@ -47,6 +47,7 @@ public final class MainActivity extends Activity {
     private boolean destroyed = false;
     private boolean ttsInitialized = false;
     private boolean speechActive = false;
+    private int requestGeneration = 0;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -128,7 +129,9 @@ public final class MainActivity extends Activity {
     }
 
     private void buildScreen() {
+        getWindow().getDecorView().setBackgroundColor(BACKGROUND);
         ScrollView scroll = new ScrollView(this);
+        scroll.setTag("zeaz:viewport");
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BACKGROUND);
         scroll.setClipToPadding(true);
@@ -147,7 +150,9 @@ public final class MainActivity extends Activity {
             scroll.setFitsSystemWindows(true);
         }
         LinearLayout root = new LinearLayout(this);
+        root.setTag("zeaz:content");
         root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BACKGROUND);
         root.setPadding(dp(20), dp(28), dp(20), dp(24));
         scroll.addView(root);
         setContentView(scroll);
@@ -166,7 +171,9 @@ public final class MainActivity extends Activity {
 
         root.addView(text("ZEAZ  /  ULTIMATE", 13, SUCCESS, true));
         addSpace(root, 8);
-        root.addView(text("Your AI companion", 29, TEXT, true));
+        TextView title = text("Your AI companion", 29, TEXT, true);
+        title.setTag("zeaz:title");
+        root.addView(title);
         addSpace(root, 5);
         root.addView(text("Private gateway · Thai voice · Local AI", 13, SUBTLE, false));
         addSpace(root, 18);
@@ -306,9 +313,11 @@ public final class MainActivity extends Activity {
             status.setText("●  Enter chain:symbol:address and a device token");
             return;
         }
+        getPreferences(MODE_PRIVATE).edit().putString("endpoint", base).apply();
         setBusy(true);
         status.setText("●  Analyzing token (advisory only)...");
         output.setText("Retrieving advisory token intelligence...");
+        final int generation = ++requestGeneration;
         new Thread(() -> {
             String result;
             boolean success = false;
@@ -317,12 +326,15 @@ public final class MainActivity extends Activity {
                         fields[1], fields[0], fields[2]);
                 success = true;
             } catch (Exception ex) {
-                result = "Token analysis unavailable (" + ex.getClass().getSimpleName() + ").";
+                String message = ex.getMessage();
+                result = message != null && message.matches("Intelligence API HTTP [0-9]{3}")
+                        ? "Token analysis unavailable: " + message
+                        : "Token analysis unavailable (" + ex.getClass().getSimpleName() + ").";
             }
             final String response = result;
             final boolean ok = success;
             runOnUiThread(() -> {
-                if (destroyed || isFinishing()) return;
+                if (destroyed || isFinishing() || generation != requestGeneration) return;
                 output.setText(response);
                 status.setText(ok ? "●  Advisory analysis received" : "●  Advisory analysis failed");
                 setBusy(false);
@@ -356,6 +368,7 @@ public final class MainActivity extends Activity {
         setBusy(true);
         status.setText("●  Thinking...");
         output.setText("ZEAZ is preparing a response…");
+        final int generation = ++requestGeneration;
         new Thread(() -> {
             HttpURLConnection connection = null;
             String answer;
@@ -397,7 +410,7 @@ public final class MainActivity extends Activity {
             final String reply = answer;
             final boolean ok = success;
             runOnUiThread(() -> {
-                if (destroyed || isFinishing()) return;
+                if (destroyed || isFinishing() || generation != requestGeneration) return;
                 output.setText(reply);
                 status.setText(ok ? "●  Connected · Response received" : "●  Gateway request failed");
                 setBusy(false);

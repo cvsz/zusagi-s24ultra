@@ -7,6 +7,7 @@ import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.Typeface;
 import android.view.View;
 import android.provider.Settings;
 
@@ -15,8 +16,13 @@ import android.provider.Settings;
  * no camera access, background service, microphone recording, or network calls.
  */
 public final class JarvisHudView extends View {
+    private static final int[] BACKDROP_COLORS = {
+            Color.rgb(12, 33, 60), Color.rgb(9, 17, 35), Color.rgb(14, 27, 52)
+    };
+    private static final Typeface LOGO_TYPEFACE = Typeface.create("sans-serif-medium", Typeface.BOLD);
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF oval = new RectF();
+    private Shader backdropShader;
     private long epoch = android.os.SystemClock.uptimeMillis();
     private boolean active = true;
     public enum State { IDLE, LISTENING, THINKING, SPEAKING, ERROR }
@@ -67,6 +73,13 @@ public final class JarvisHudView extends View {
         super.onDetachedFromWindow();
     }
 
+    @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight);
+        backdropShader = width > 0 && height > 0
+                ? new LinearGradient(0, 0, width, height, BACKDROP_COLORS, null, Shader.TileMode.CLAMP)
+                : null;
+    }
+
     private void ring(Canvas canvas, float x, float y, float rx, float ry,
                       int color, float stroke, float start, float sweep) {
         paint.reset();
@@ -96,9 +109,7 @@ public final class JarvisHudView extends View {
         paint.reset();
         paint.setAntiAlias(true);
         paint.setStyle(Paint.Style.FILL);
-        paint.setShader(new LinearGradient(0, 0, width, height,
-                new int[]{Color.rgb(12, 33, 60), Color.rgb(9, 17, 35), Color.rgb(14, 27, 52)},
-                null, Shader.TileMode.CLAMP));
+        paint.setShader(backdropShader);
         canvas.drawRoundRect(0, 0, width, height, 22 * unit, 22 * unit, paint);
         paint.setShader(null);
 
@@ -135,8 +146,7 @@ public final class JarvisHudView extends View {
         canvas.drawCircle(x, y, 22 * unit, paint);
         paint.setColor(Color.WHITE);
         paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTypeface(android.graphics.Typeface.create("sans-serif-medium",
-                android.graphics.Typeface.BOLD));
+        paint.setTypeface(LOGO_TYPEFACE);
         paint.setTextSize(14 * unit);
         canvas.drawText("ZEAZ", x, y + 5 * unit, paint);
         paint.setTypeface(android.graphics.Typeface.DEFAULT);
