@@ -29,7 +29,7 @@ The project uses the engine Entry map and a C++ GameMode, so no binary map asset
 
 `AHumandroidAvatarPawn::ApplyAssistantEvent(EventName, AudioAmplitude)` accepts only the seven state labels above. Amplitude is clamped to `[0,1]`. Invalid state names are rejected. This method is an in-process rendering interface, not an authorization boundary and not a network API.
 
-The existing native app remains the owner of microphone permission, speech recognition, TTS, Gateway authentication, and AI requests. A future integration should pass only validated visual events through a same-signature Android bridge or a narrowly scoped local IPC contract. Do not pass bearer tokens, provider credentials, prompts, transcripts, or zworkforce commands into the renderer. No native-to-UE IPC or combined APK has been implemented or verified yet.
+The existing native app remains the owner of microphone permission, speech recognition, TTS, Gateway authentication, and AI requests. The implemented native-to-UE companion IPC passes only validated visual events through a same-signature Android bridge. Do not pass bearer tokens, provider credentials, prompts, transcripts, or zworkforce commands into the renderer. The bridge source exists, but the combined cross-application runtime path still requires an Unreal build and certificate-aligned device verification.
 
 ## Validation
 
