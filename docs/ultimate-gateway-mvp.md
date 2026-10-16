@@ -20,6 +20,10 @@ Do not paste tokens into GitHub, commit them, or place provider credentials on A
 python3 -m unittest discover -s tests -p 'test_gateway*.py' -v
 ```
 
+The local Gateway exposes `GET /healthz` (process liveness) and `GET /readyz` (configuration loaded). Readiness does not probe or certify the provider, public proxy, or end-to-end Android route. `GET /health` remains as a compatibility alias.
+
+`POST /v1/chat` uses a process-wide sliding-window limit and a bounded number of simultaneous upstream calls. Defaults are 60 accepted chat requests per minute and 4 upstream calls at a time. Operators may set `ZEAZ_GATEWAY_REQUESTS_PER_MINUTE` (1–100000) and `ZEAZ_GATEWAY_MAX_CONCURRENT_UPSTREAMS` (1–256). Excess requests receive HTTP 429; when all upstream slots are occupied, the request receives HTTP 503. Limits are per process, shared by all clients using the static Gateway token; they are not per-device/tenant limits and do not coordinate across multiple workers or replicas. Retain edge-level identity-aware rate limits and concurrency controls for a public deployment.
+
 ## Network and security
 
 The server deliberately binds to loopback only (default `127.0.0.1:8765`) and **does not serve TLS**. To use it from Android, deploy behind a trusted HTTPS reverse proxy or Cloudflare Tunnel with authentication, per-device authorization, rate limiting, and request/audit controls. Never expose the raw loopback HTTP listener publicly or reuse the provider API key as a device token.
@@ -49,5 +53,5 @@ The token-advisory action sends `POST /v1/analyze` with `{"token":{"chain":"..."
 - Static bearer token is suitable only for controlled development; replace with expiring per-device credentials and revocation before production.
 - No tool execution, multi-agent planning, durable memory, push notifications, or background actions. SSE v1 streams chat text only; it does not stream tool events or authorize actions.
 - Gateway currently depends on the configured provider's OpenAI-compatible response contract.
-- Require TLS, proxy rate limits, provider allowlisting, operational logs with redaction, concurrency limits, and device integration tests before production.
+- Require TLS, identity-aware proxy rate limits, provider allowlisting and egress controls, operational logs with redaction, multi-replica capacity controls where applicable, and device integration tests before production.
 - Test actual S24 Ultra installation, network failure, authentication failure, voice/TTS, and rollback. CI passing alone does not establish device readiness.

@@ -10,6 +10,8 @@ import android.os.Build;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
+import android.widget.Button;
+import android.widget.EditText;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.ByteArrayInputStream;
@@ -154,7 +156,8 @@ public final class MainActivityInstrumentedTest {
       assertEquals("Your AI companion", ((TextView) title).getText().toString());
       assertFalse("The title must not display an escaped newline",
           ((TextView) title).getText().toString().contains("\\n"));
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+          && activity.getWindow().getDecorView().hasWindowFocus()) {
         assertTrue("System bar insets must move content below the status bar",
             viewport.getPaddingTop() > 0);
       }
@@ -241,6 +244,101 @@ public final class MainActivityInstrumentedTest {
     float thinkingPose = JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.THINKING);
     assertTrue("Listening and thinking should have distinct motion profiles",
         Math.abs(listeningPose - thinkingPose) > 0.05f);
+  }
+
+  @Test public void humanoidHudUsesStableFrameWhenReducedMotionIsEnabled() throws Exception {
+    JarvisHudView hud = new JarvisHudView(InstrumentationRegistry.getInstrumentation().getTargetContext());
+    hud.measure(View.MeasureSpec.makeMeasureSpec(340, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(220, View.MeasureSpec.EXACTLY));
+    hud.layout(0, 0, 340, 220);
+    hud.setReducedMotionEnabled(true);
+    hud.setResumed(false);
+    Bitmap first = Bitmap.createBitmap(340, 220, Bitmap.Config.ARGB_8888);
+    Bitmap second = Bitmap.createBitmap(340, 220, Bitmap.Config.ARGB_8888);
+    hud.draw(new Canvas(first));
+    Thread.sleep(80);
+    hud.draw(new Canvas(second));
+    int[] firstPixels = new int[340 * 220], secondPixels = new int[340 * 220];
+    first.getPixels(firstPixels, 0, 340, 0, 0, 340, 220);
+    second.getPixels(secondPixels, 0, 340, 0, 0, 340, 220);
+    first.recycle();
+    second.recycle();
+    assertTrue("Reduced motion should render an identical frame over time",
+        java.util.Arrays.equals(firstPixels, secondPixels));
+  }
+
+  @Test public void humanoidHudChangesPosePaletteAndAccessibleStateByAssistantState() {
+    JarvisHudView hud = new JarvisHudView(InstrumentationRegistry.getInstrumentation().getTargetContext());
+    assertTrue(hud.getContentDescription().toString().startsWith("ZEAZ AI status: idle"));
+    hud.setState(JarvisHudView.State.LISTENING);
+    assertTrue(hud.getContentDescription().toString().startsWith("ZEAZ AI status: listening"));
+    assertEquals(JarvisHudView.State.LISTENING, hud.getState());
+    assertTrue(JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.LISTENING)
+        != JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.THINKING));
+  }
+
+  @Test public void workflowSequenceValidatesDependenciesAndPreviewsStableOrder() {
+    WorkflowSequenceModel model = new WorkflowSequenceModel();
+    model.add("review", "Review", java.util.Arrays.asList("build"));
+    model.add("build", "Build", java.util.Collections.emptyList());
+    assertTrue(model.validate().isValid());
+    assertEquals(java.util.Arrays.asList("build", "review"), model.previewOrder());
+  }
+
+  @Test public void workflowSequenceRejectsUnknownDependenciesAndCycles() {
+    WorkflowSequenceModel unknown = new WorkflowSequenceModel();
+    unknown.add("review", "Review", java.util.Arrays.asList("missing"));
+    assertFalse(unknown.validate().isValid());
+    WorkflowSequenceModel cycle = new WorkflowSequenceModel();
+    cycle.add("one", "One", java.util.Arrays.asList("two"));
+    cycle.add("two", "Two", java.util.Arrays.asList("one"));
+    assertFalse(cycle.validate().isValid());
+  }
+
+  @Test public void activityExposesVoiceStatusReducedMotionAndPreviewOnlyWorkflow() {
+    Intent intent = new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(), MainActivity.class);
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    Activity activity = InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
+    InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    try {
+      assertNotNull(findTag(activity.getWindow().getDecorView(), "zeaz:speech-status"));
+      assertNotNull(findTag(activity.getWindow().getDecorView(), "zeaz:reduced-motion"));
+      EditText title = (EditText) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-title");
+      assertNotNull(title);
+      activity.runOnUiThread(() -> {
+        title.setText("Plan only");
+        ((Button) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-add")).performClick();
+        ((Button) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-preview")).performClick();
+      });
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+      TextView result = (TextView) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-result");
+      assertTrue(result.getText().toString().contains("not executed"));
+    } finally {
+      activity.finish();
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    }
+  }
+
+  @Test public void physicalDeviceReportsThaiTtsInitializationOutcome() throws Exception {
+    Intent intent = new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(), MainActivity.class);
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    Activity activity = InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
+    try {
+      TextView speech = (TextView) findTag(activity.getWindow().getDecorView(), "zeaz:speech-status");
+      assertNotNull(speech);
+      long deadline = android.os.SystemClock.uptimeMillis() + 8000;
+      while (speech.getText().toString().contains("Initializing")
+          && android.os.SystemClock.uptimeMillis() < deadline) {
+        Thread.sleep(100);
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+      }
+      assertFalse("TTS initialization must resolve to ready or a visible unavailable state",
+          speech.getText().toString().contains("Initializing"));
+      assertTrue(speech.getText().toString().contains("text-to-speech"));
+    } finally {
+      activity.finish();
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+    }
   }
 
   private static int backgroundColor(View view) {

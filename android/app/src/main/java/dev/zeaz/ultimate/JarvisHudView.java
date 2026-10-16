@@ -28,6 +28,8 @@ public final class JarvisHudView extends View {
     private Shader backdropShader;
     private long epoch = android.os.SystemClock.uptimeMillis();
     private boolean active = true;
+    private boolean reducedMotionEnabled;
+    private boolean systemMotionEnabled = true;
     public enum State {
         INITIALIZING, DISCONNECTED, IDLE, LISTENING, TRANSCRIBING,
         THINKING, STREAMING, SPEAKING, ERROR, PAUSED
@@ -37,7 +39,7 @@ public final class JarvisHudView extends View {
 
     public JarvisHudView(Context context) {
         super(context);
-        setContentDescription("Animated ZEAZ holographic AI interface");
+        setAccessibilityDescription();
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
     }
 
@@ -47,30 +49,49 @@ public final class JarvisHudView extends View {
 
     public void setState(State value) {
         state = value == null ? State.IDLE : value;
-        setContentDescription("ZEAZ AI status: " + state.name().toLowerCase(java.util.Locale.ROOT));
+        setAccessibilityDescription();
         invalidate();
     }
 
     public State getState() { return state; }
+
+    public void setReducedMotionEnabled(boolean value) {
+        reducedMotionEnabled = value;
+        setAccessibilityDescription();
+        invalidate();
+    }
+
+    public boolean isReducedMotionEnabled() { return reducedMotionEnabled; }
+
+    public void refreshMotionSettings() {
+        try {
+            systemMotionEnabled = Settings.Global.getFloat(getContext().getContentResolver(),
+                    Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f;
+        } catch (SecurityException ex) {
+            systemMotionEnabled = false;
+        }
+        setAccessibilityDescription();
+        invalidate();
+    }
+
+    private void setAccessibilityDescription() {
+        String description = "ZEAZ AI status: " + state.name().toLowerCase(java.util.Locale.ROOT);
+        if (reducedMotionEnabled || !systemMotionEnabled) description += ", reduced motion";
+        setContentDescription(description);
+    }
 
     public void setResumed(boolean value) {
         resumed = value;
         if (value) postInvalidateOnAnimation();
     }
 
-    private boolean motionEnabled() {
-        try {
-            return Settings.Global.getFloat(getContext().getContentResolver(),
-                    Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f;
-        } catch (SecurityException ex) {
-            return false;
-        }
-    }
+    private boolean motionEnabled() { return systemMotionEnabled && !reducedMotionEnabled; }
 
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         active = true;
         epoch = android.os.SystemClock.uptimeMillis();
+        refreshMotionSettings();
         postInvalidateOnAnimation();
     }
 
@@ -104,11 +125,15 @@ public final class JarvisHudView extends View {
         if (width <= 0 || height <= 0) return;
         float x = width / 2f, y = height * 0.49f;
         float unit = Math.min(width / 340f, height / 220f);
-        float angle = motionEnabled() ? ((android.os.SystemClock.uptimeMillis() - epoch) % 24000L) * 360f / 24000f : 0f;
-        float pulse = (float) Math.sin(Math.toRadians(angle * 3)) * 0.5f + 0.5f;
+        float seconds = motionEnabled()
+                ? (android.os.SystemClock.uptimeMillis() - epoch) / 1000f : 0f;
+        float angle = seconds * rotationRate(state) * 15f;
+        float pulse = (float) Math.sin(seconds * pulseRate(state)) * 0.5f + 0.5f;
         int cyan = state == State.ERROR ? Color.rgb(255, 109, 125)
                 : state == State.LISTENING ? Color.rgb(79, 215, 168)
                 : state == State.SPEAKING ? Color.rgb(255, 188, 87)
+                : state == State.TRANSCRIBING ? Color.rgb(255, 211, 91)
+                : state == State.PAUSED || state == State.DISCONNECTED ? Color.rgb(139, 153, 177)
                 : Color.rgb(61, 221, 255);
         int blue = Color.rgb(83, 112, 255);
 
@@ -140,8 +165,11 @@ public final class JarvisHudView extends View {
                 1.1f * unit, angle, 228);
         ring(canvas, x, y, 90 * unit, 59 * unit, Color.argb(170, 101, 161, 255),
                 2.2f * unit, -angle * 1.3f, 108);
-        ring(canvas, x, y, 76 * unit, 51 * unit, cyan, 2.3f * unit, angle * 1.8f, 82);
-        ring(canvas, x, y, 76 * unit, 51 * unit, blue, 2.3f * unit, angle * 1.8f + 180, 82);
+        float sweep = state == State.STREAMING ? 55 + 230 * pulse
+                : state == State.LISTENING ? 120 + 90 * pulse
+                : state == State.ERROR ? 65 : 82;
+        ring(canvas, x, y, 76 * unit, 51 * unit, cyan, 2.3f * unit, angle * 1.8f, sweep);
+        ring(canvas, x, y, 76 * unit, 51 * unit, blue, 2.3f * unit, angle * 1.8f + 180, sweep);
         ring(canvas, x, y, 59 * unit, 39 * unit, Color.argb(160, 57, 216, 255),
                 1f * unit, 0, 360);
 
@@ -163,13 +191,42 @@ public final class JarvisHudView extends View {
                 : state == State.DISCONNECTED ? "DISCONNECTED"
                 : state == State.LISTENING ? "LISTENING"
                 : state == State.TRANSCRIBING ? "TRANSCRIBING"
-                : state == State.THINKING || state == State.STREAMING ? "PROCESSING"
+                : state == State.THINKING ? "THINKING"
+                : state == State.STREAMING ? "STREAMING"
                 : state == State.SPEAKING ? "SPEAKING"
                 : state == State.ERROR ? "ASSISTANT ERROR"
                 : state == State.PAUSED ? "PAUSED" : "AI CORE ONLINE";
         canvas.drawText(caption, x, y + 98 * unit, paint);
         if (active && resumed && motionEnabled() && getWindowVisibility() == VISIBLE && isShown()) {
             postInvalidateDelayed(40);
+        }
+    }
+
+    private static float rotationRate(State state) {
+        switch (state) {
+            case LISTENING: return 2.0f;
+            case TRANSCRIBING: return 0.55f;
+            case THINKING: return 0.35f;
+            case STREAMING: return 1.25f;
+            case SPEAKING: return 2.2f;
+            case ERROR: return 0.18f;
+            case PAUSED:
+            case DISCONNECTED: return 0f;
+            default: return 0.45f;
+        }
+    }
+
+    private static float pulseRate(State state) {
+        switch (state) {
+            case LISTENING: return 3.4f;
+            case TRANSCRIBING: return 1.0f;
+            case THINKING: return 0.55f;
+            case STREAMING: return 2.4f;
+            case SPEAKING: return 5.2f;
+            case ERROR: return 0.4f;
+            case PAUSED:
+            case DISCONNECTED: return 0f;
+            default: return 1.2f;
         }
     }
 

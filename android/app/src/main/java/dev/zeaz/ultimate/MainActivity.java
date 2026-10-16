@@ -15,6 +15,7 @@ import android.view.WindowInsets;
 import android.os.Build;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -39,6 +40,7 @@ public final class MainActivity extends Activity {
     private static final int SUCCESS = Color.rgb(79, 215, 168);
     private EditText endpoint, token, input;
     private TextView status, output;
+    private TextView speechStatus;
     private Button send, speak, intelligence;
     private TextToSpeech tts;
     private SpeechAudioFocusController speechFocus;
@@ -53,6 +55,10 @@ public final class MainActivity extends Activity {
     private long utteranceGeneration = 0;
     private String activeUtteranceId;
     private final AssistantStateMachine assistantState = new AssistantStateMachine();
+    private final WorkflowSequenceModel workflow = new WorkflowSequenceModel();
+    private LinearLayout workflowCards;
+    private EditText workflowTitle, workflowDependencies;
+    private int workflowSequence = 0;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -63,14 +69,18 @@ public final class MainActivity extends Activity {
             if (!destroyed && ttsInitialized && tts != null) {
                 speechReady = tts.setLanguage(new Locale("th", "TH")) >= TextToSpeech.LANG_AVAILABLE;
             }
+            updateSpeechStatus(speechReady ? "Thai text-to-speech ready" : "Thai text-to-speech unavailable",
+                    speechReady);
         }));
         buildScreen();
+        updateSpeechStatus("Initializing Thai text-to-speech", false);
         transition(AssistantStateMachine.Event.INITIALIZATION_COMPLETE);
         if (tts != null) {
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override public void onStart(String utteranceId) {
                     runOnUiThread(() -> {
                         if (!destroyed && speechActive && utteranceId.equals(activeUtteranceId)) {
+                            updateSpeechStatus("Speaking Thai response", true);
                             transition(AssistantStateMachine.Event.SPEECH_STARTED);
                         }
                     });
@@ -83,6 +93,7 @@ public final class MainActivity extends Activity {
                             speechActive = false;
                             activeUtteranceId = null;
                             if (speechFocus != null) speechFocus.release();
+                            updateSpeechStatus(success ? "Speech finished" : "Speech playback failed", success);
                             transition(success ? AssistantStateMachine.Event.SPEECH_COMPLETED
                                     : AssistantStateMachine.Event.FAILURE);
                         }
@@ -166,6 +177,98 @@ public final class MainActivity extends Activity {
         return button;
     }
 
+    private void updateSpeechStatus(String message, boolean success) {
+        if (speechStatus == null) return;
+        speechStatus.setText("Voice / TTS: " + message);
+        speechStatus.setTextColor(success ? SUCCESS : Color.rgb(255, 143, 154));
+    }
+
+    private void addWorkflowBuilder(LinearLayout root) {
+        root.addView(text("VISUAL SEQUENCE BUILDER", 12, SUBTLE, true));
+        addSpace(root, 6);
+        root.addView(text("Preview only · does not execute or contact a service", 13, SUBTLE, false));
+        addSpace(root, 10);
+        workflowTitle = edit("Step title", false);
+        workflowTitle.setTag("zeaz:workflow-title");
+        root.addView(workflowTitle, new LinearLayout.LayoutParams(-1, dp(50)));
+        addSpace(root, 8);
+        workflowDependencies = edit("Depends on step IDs (comma separated)", false);
+        workflowDependencies.setTag("zeaz:workflow-dependencies");
+        root.addView(workflowDependencies, new LinearLayout.LayoutParams(-1, dp(50)));
+        addSpace(root, 8);
+        Button add = action("Add workflow step", PANEL);
+        add.setTag("zeaz:workflow-add");
+        root.addView(add, new LinearLayout.LayoutParams(-1, dp(48)));
+        add.setOnClickListener(view -> {
+            String titleValue = workflowTitle.getText().toString().trim();
+            String id = "step-" + (++workflowSequence);
+            java.util.List<String> dependencies = new ArrayList<>();
+            for (String dependency : workflowDependencies.getText().toString().split(","))
+                if (!dependency.trim().isEmpty()) dependencies.add(dependency.trim());
+            try {
+                workflow.add(id, titleValue, dependencies);
+                addWorkflowCard(id, titleValue, dependencies);
+                workflowTitle.setText("");
+                workflowDependencies.setText("");
+                renderWorkflowPreview();
+            } catch (IllegalArgumentException error) {
+                setWorkflowPreview("Cannot add step: " + error.getMessage(), false);
+            }
+        });
+        addSpace(root, 10);
+        workflowCards = new LinearLayout(this);
+        workflowCards.setOrientation(LinearLayout.VERTICAL);
+        workflowCards.setTag("zeaz:workflow-cards");
+        root.addView(workflowCards, new LinearLayout.LayoutParams(-1, -2));
+        Button preview = action("Validate and preview workflow", ACCENT);
+        preview.setTag("zeaz:workflow-preview");
+        root.addView(preview, new LinearLayout.LayoutParams(-1, dp(48)));
+        TextView result = text("Add steps to preview their dependency order.", 13, SUBTLE, false);
+        result.setTag("zeaz:workflow-result");
+        result.setPadding(dp(4), dp(10), dp(4), dp(10));
+        root.addView(result);
+        preview.setOnClickListener(view -> renderWorkflowPreview());
+    }
+
+    private void addWorkflowCard(String id, String titleValue, java.util.List<String> dependencies) {
+        TextView card = text(id + "  ·  " + titleValue + "\nDepends on: "
+                + (dependencies.isEmpty() ? "none" : android.text.TextUtils.join(", ", dependencies)),
+                14, TEXT, true);
+        card.setContentDescription("Workflow step " + id + ": " + titleValue + ". Depends on: "
+                + (dependencies.isEmpty() ? "none" : android.text.TextUtils.join(", ", dependencies)));
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        card.setBackground(surface(PANEL, 14));
+        workflowCards.addView(card, new LinearLayout.LayoutParams(-1, -2));
+        TextView connector = text("↓", 18, SUCCESS, true);
+        connector.setGravity(Gravity.CENTER);
+        workflowCards.addView(connector, new LinearLayout.LayoutParams(-1, dp(30)));
+    }
+
+    private void renderWorkflowPreview() {
+        WorkflowSequenceModel.Validation validation = workflow.validate();
+        if (!validation.isValid()) {
+            setWorkflowPreview("Dependency validation failed:\n• "
+                    + android.text.TextUtils.join("\n• ", validation.errors), false);
+            return;
+        }
+        java.util.List<String> order = workflow.previewOrder();
+        java.util.List<String> labels = new ArrayList<>();
+        java.util.Map<String, String> titles = new java.util.HashMap<>();
+        for (WorkflowSequenceModel.Step step : workflow.steps()) titles.put(step.id, step.title);
+        for (int i = 0; i < order.size(); i++)
+            labels.add((i + 1) + ". " + order.get(i) + " — " + titles.get(order.get(i)));
+        setWorkflowPreview(order.isEmpty() ? "No steps to preview."
+                : "Valid preview order (not executed):\n" + android.text.TextUtils.join("\n↓\n", labels), true);
+    }
+
+    private void setWorkflowPreview(String message, boolean valid) {
+        View result = getWindow().getDecorView().findViewWithTag("zeaz:workflow-result");
+        if (result instanceof TextView) {
+            ((TextView) result).setText(message);
+            ((TextView) result).setTextColor(valid ? SUCCESS : Color.rgb(255, 143, 154));
+        }
+    }
+
     private void buildScreen() {
         getWindow().getDecorView().setBackgroundColor(BACKGROUND);
         ScrollView scroll = new ScrollView(this);
@@ -217,6 +320,17 @@ public final class MainActivity extends Activity {
         addSpace(root, 18);
         hud = new JarvisHudView(this);
         root.addView(hud, new LinearLayout.LayoutParams(-1, dp(226)));
+        CheckBox reducedMotion = new CheckBox(this);
+        reducedMotion.setTag("zeaz:reduced-motion");
+        reducedMotion.setText("Reduce avatar motion");
+        reducedMotion.setTextColor(TEXT);
+        reducedMotion.setChecked(getPreferences(MODE_PRIVATE).getBoolean("reduce_motion", false));
+        hud.setReducedMotionEnabled(reducedMotion.isChecked());
+        reducedMotion.setOnCheckedChangeListener((button, checked) -> {
+            hud.setReducedMotionEnabled(checked);
+            getPreferences(MODE_PRIVATE).edit().putBoolean("reduce_motion", checked).apply();
+        });
+        root.addView(reducedMotion);
         addSpace(root, 18);
 
         LinearLayout connection = new LinearLayout(this);
@@ -260,6 +374,10 @@ public final class MainActivity extends Activity {
         actions.addView(send, new LinearLayout.LayoutParams(0, dp(52), 1));
         voice.setOnClickListener(v -> startVoice());
         send.setOnClickListener(v -> ask());
+        speechStatus = text("Voice: ready · Thai TTS initializing", 13, SUBTLE, false);
+        speechStatus.setTag("zeaz:speech-status");
+        speechStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        root.addView(speechStatus);
 
         addSpace(root, 12);
         intelligence = action("Analyze token (advisory only)", PANEL);
@@ -285,26 +403,32 @@ public final class MainActivity extends Activity {
             if (!prepareUserOperation()) return;
             if (!speechReady || tts == null || destroyed) {
                 Toast.makeText(this, "Thai text-to-speech unavailable", Toast.LENGTH_SHORT).show();
+                updateSpeechStatus("Thai text-to-speech unavailable", false);
                 transition(AssistantStateMachine.Event.FAILURE);
                 return;
             }
             if (speechFocus == null || !speechFocus.acquire()) {
                 Toast.makeText(this, "Audio focus unavailable", Toast.LENGTH_SHORT).show();
+                updateSpeechStatus("Audio focus unavailable", false);
                 transition(AssistantStateMachine.Event.FAILURE);
                 return;
             }
             speechActive = true;
             activeUtteranceId = "zeaz-response-" + (++utteranceGeneration);
             transition(AssistantStateMachine.Event.SPEECH_STARTED);
+            updateSpeechStatus("Starting Thai speech", true);
             int result = tts.speak(output.getText().toString(), TextToSpeech.QUEUE_FLUSH,
                     null, activeUtteranceId);
             if (result == TextToSpeech.ERROR) {
                 speechActive = false;
                 activeUtteranceId = null;
                 speechFocus.release();
+                updateSpeechStatus("Speech playback failed to start", false);
                 transition(AssistantStateMachine.Event.FAILURE);
             }
         });
+        addSpace(root, 24);
+        addWorkflowBuilder(root);
         addSpace(root, 20);
         root.addView(text("Gateway credentials stay in memory for this session only. Requests use HTTPS.", 12, SUBTLE, false));
         addSpace(root, 48);
@@ -317,9 +441,11 @@ public final class MainActivity extends Activity {
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         try {
             if (!transition(AssistantStateMachine.Event.LISTENING_STARTED)) return;
+            updateSpeechStatus("Listening for Thai speech", true);
             startActivityForResult(intent, VOICE_REQUEST);
         } catch (Exception ex) {
             status.setText("●  Speech recognition unavailable");
+            updateSpeechStatus("Thai speech recognition unavailable", false);
             transition(AssistantStateMachine.Event.FAILURE);
         }
     }
@@ -510,20 +636,28 @@ public final class MainActivity extends Activity {
             ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
             if (results != null && !results.isEmpty() && !results.get(0).trim().isEmpty()) {
                 transition(AssistantStateMachine.Event.TRANSCRIPTION_STARTED);
+                updateSpeechStatus("Thai transcription received", true);
                 input.setText(results.get(0));
                 transition(AssistantStateMachine.Event.TRANSCRIPTION_COMPLETED);
                 status.setText("●  Thai speech recognized");
             } else {
+                updateSpeechStatus("No Thai transcript returned", false);
                 transition(AssistantStateMachine.Event.CANCEL);
             }
         } else if (requestCode == VOICE_REQUEST) {
+            updateSpeechStatus(resultCode == RESULT_CANCELED
+                    ? "Speech recognition cancelled" : "Speech recognition failed", false);
             transition(AssistantStateMachine.Event.CANCEL);
         }
     }
 
     @Override protected void onResume() {
         super.onResume();
-        if (hud != null) hud.setResumed(true);
+        if (hud != null) {
+            hud.setResumed(true);
+            hud.refreshMotionSettings();
+            hud.setReducedMotionEnabled(getPreferences(MODE_PRIVATE).getBoolean("reduce_motion", false));
+        }
         if (assistantState.state() == AssistantStateMachine.State.PAUSED) {
             transition(AssistantStateMachine.Event.RESUME);
         }

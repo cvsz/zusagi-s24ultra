@@ -2,10 +2,70 @@ import io
 import json
 import unittest
 from unittest.mock import patch
-from gateway.server import Handler, config, MAX_BODY, MAX_UPSTREAM, NoRedirect
+from gateway.server import (Handler, config, MAX_BODY, MAX_UPSTREAM, NoRedirect,
+                            WindowRateLimiter, positive_setting)
 
 
 class GatewayTests(unittest.TestCase):
+    def test_health_and_readiness_are_public_and_do_not_expose_configuration(self):
+        for path, expected in (("/health", 200), ("/healthz", 200), ("/readyz", 200)):
+            result = self.get(path)
+            self.assertEqual(result["status_code"], expected)
+            self.assertNotIn("token", json.dumps(result).lower())
+
+    def test_readiness_fails_when_gateway_configuration_is_missing(self):
+        result = self.get("/readyz", settings=None)
+        self.assertEqual(result["status_code"], 503)
+
+    def test_global_rate_limit_rejects_excess_chat_without_calling_provider(self):
+        limiter = WindowRateLimiter(1, 60, clock=lambda: 100.0)
+        self.request("/v1/chat", b'{"message":"first"}', "Bearer " + "x" * 24,
+                     rate_limiter=limiter)
+        with patch("gateway.server.generate_reply") as upstream:
+            result = self.request("/v1/chat", b'{"message":"second"}', "Bearer " + "x" * 24,
+                                  rate_limiter=limiter)
+        self.assertEqual(result["status"], 429)
+        upstream.assert_not_called()
+
+    def test_concurrency_limit_rejects_when_upstream_slots_are_busy(self):
+        from threading import BoundedSemaphore
+        slots = BoundedSemaphore(1)
+        slots.acquire()
+        with patch("gateway.server.generate_reply") as upstream:
+            result = self.request("/v1/chat", b'{"message":"hi"}', "Bearer " + "x" * 24,
+                                  upstream_slots=slots)
+        self.assertEqual(result["status"], 503)
+        upstream.assert_not_called()
+        slots.release()
+
+    def test_upstream_slot_is_released_after_provider_error(self):
+        from threading import BoundedSemaphore
+        slots = BoundedSemaphore(1)
+        limiter = WindowRateLimiter(10, 60, clock=lambda: 100.0)
+        with patch("gateway.server.generate_reply", side_effect=[ValueError("invalid"), "recovered"]):
+            failed = self.request("/v1/chat", b'{"message":"first"}', "Bearer " + "x" * 24,
+                                  rate_limiter=limiter, upstream_slots=slots)
+            recovered = self.request("/v1/chat", b'{"message":"second"}', "Bearer " + "x" * 24,
+                                     rate_limiter=limiter, upstream_slots=slots)
+        self.assertEqual(failed["status"], 502)
+        self.assertEqual(recovered["status"], 200)
+
+    def test_rate_limiter_expires_window_entries(self):
+        now = [0.0]
+        limiter = WindowRateLimiter(1, 10, clock=lambda: now[0])
+        self.assertTrue(limiter.allow())
+        self.assertFalse(limiter.allow())
+        now[0] = 10.0
+        self.assertTrue(limiter.allow())
+
+    def test_gateway_limits_are_bounded_positive_settings(self):
+        with patch.dict("os.environ", {"ZEAZ_LIMIT": "3"}):
+            self.assertEqual(positive_setting("ZEAZ_LIMIT", 60, 4), 3)
+        for value in ("0", "5", "invalid"):
+            with self.subTest(value=value), patch.dict("os.environ", {"ZEAZ_LIMIT": value}):
+                with self.assertRaises(ValueError):
+                    positive_setting("ZEAZ_LIMIT", 60, 4)
+
     def test_config_rejects_http_upstream(self):
         env = {
             "ZEAZ_GATEWAY_TOKEN": "x" * 24,
@@ -145,7 +205,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(result["status"], 502)
         self.assertEqual(result["error"], "upstream_unavailable")
 
-    def request(self, path, body, authorization, extra_headers=None):
+    def request(self, path, body, authorization, extra_headers=None, rate_limiter=None, upstream_slots=None):
         class FakeHandler(Handler):
             def __init__(self):
                 self.path = path
@@ -154,6 +214,9 @@ class GatewayTests(unittest.TestCase):
                 self.rfile = io.BytesIO(body)
                 self.wfile = io.BytesIO()
                 self.settings = ("x" * 24, "placeholder", "model", "https://example.com/v1")
+                self.rate_limiter = rate_limiter or WindowRateLimiter(1000, 60)
+                from threading import BoundedSemaphore
+                self.upstream_slots = upstream_slots or BoundedSemaphore(4)
                 self.status = None
 
             def send_response(self, status):
@@ -174,6 +237,22 @@ class GatewayTests(unittest.TestCase):
         handler.do_POST()
         return {"status": handler.status, **getattr(handler, "data", {}),
                 "body": handler.wfile.getvalue().decode("utf-8", errors="replace")}
+
+    def get(self, path, settings=("x" * 24, "placeholder", "model", "https://example.com/v1")):
+        class FakeHandler(Handler):
+            def __init__(self):
+                self.path = path
+                self.settings = settings
+                self.status = None
+
+            def send_response(self, status): self.status = status
+            def send_header(self, *_): pass
+            def end_headers(self): pass
+            def respond(self, status, data): self.status, self.data = status, data
+
+        handler = FakeHandler()
+        handler.do_GET()
+        return {"status_code": handler.status, **getattr(handler, "data", {})}
 
 
 if __name__ == "__main__":
