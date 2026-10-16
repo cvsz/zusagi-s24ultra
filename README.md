@@ -1,4 +1,6 @@
-# ZEAZ Ultimate Ollama Gateway — development pilot
+# zusagi-s26ultra
+
+## ZEAZ Ultimate Ollama Gateway — development pilot
 
 A standalone local gateway for `POST /v1/chat`, returning `{"reply":"..."}`. Uses Ollama at `127.0.0.1:11434`, with a bounded request body, constant-time bearer-token comparison, two concurrent upstream requests, and no device-side provider credentials. No third-party Python packages.
 

@@ -26,6 +26,32 @@ import static org.junit.Assert.fail;
 
 @RunWith(AndroidJUnit4.class)
 public final class MainActivityInstrumentedTest {
+  @Test public void rendererIpcIsPackageScopedAndCarriesOnlyBoundedVisualState() {
+    Intent event = HumandroidRendererBridge.createEventIntent("speaking", 0.4f, 17L);
+    assertEquals(HumandroidRendererBridge.ACTION_STATE, event.getAction());
+    assertEquals(HumandroidRendererBridge.RENDERER_PACKAGE, event.getPackage());
+    assertEquals(1, event.getIntExtra(HumandroidRendererBridge.EXTRA_VERSION, 0));
+    assertEquals("SPEAKING", event.getStringExtra(HumandroidRendererBridge.EXTRA_STATE));
+    assertEquals(0.4f, event.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0001f);
+    assertEquals(17L, event.getLongExtra(HumandroidRendererBridge.EXTRA_SEQUENCE, -1));
+    assertFalse(event.hasExtra("token"));
+    assertFalse(event.hasExtra("prompt"));
+    assertFalse(event.hasExtra("transcript"));
+  }
+
+  @Test public void rendererIpcClampsAmplitudeAndRejectsUnknownStates() {
+    Intent high = HumandroidRendererBridge.createEventIntent("LISTENING", 8.0f, 18L);
+    assertEquals(1.0f, high.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0f);
+    Intent invalid = HumandroidRendererBridge.createEventIntent("IDLE", Float.NaN, 19L);
+    assertEquals(0.0f, invalid.getFloatExtra(HumandroidRendererBridge.EXTRA_AMPLITUDE, -1), 0.0f);
+    try {
+      HumandroidRendererBridge.createEventIntent("EXECUTE_COMMAND", 0.0f, 20L);
+      fail("Unknown renderer states must be rejected");
+    } catch (IllegalArgumentException expected) {
+      assertTrue(expected.getMessage().contains("state"));
+    }
+  }
+
   @Test public void speechAudioFocusIsAcquiredReleasedAndInterruptsOnce() {
     final int[] requests = {0}, releases = {0}, interruptions = {0};
     SpeechAudioFocusController.AudioFocusPort port = new SpeechAudioFocusController.AudioFocusPort() {
@@ -303,6 +329,7 @@ public final class MainActivityInstrumentedTest {
     try {
       assertNotNull(findTag(activity.getWindow().getDecorView(), "zeaz:speech-status"));
       assertNotNull(findTag(activity.getWindow().getDecorView(), "zeaz:reduced-motion"));
+      assertNotNull(findTag(activity.getWindow().getDecorView(), "zeaz:open-renderer"));
       EditText title = (EditText) findTag(activity.getWindow().getDecorView(), "zeaz:workflow-title");
       assertNotNull(title);
       activity.runOnUiThread(() -> {

@@ -42,6 +42,7 @@ public final class MainActivity extends Activity {
     private TextView status, output;
     private TextView speechStatus;
     private Button send, speak, intelligence;
+    private Button openRenderer;
     private TextToSpeech tts;
     private SpeechAudioFocusController speechFocus;
     private JarvisHudView hud;
@@ -112,6 +113,10 @@ public final class MainActivity extends Activity {
         if (hud != null) {
             AssistantStateMachine.State current = assistantState.state();
             hud.setState(JarvisHudView.State.valueOf(current.name()));
+            if (current != AssistantStateMachine.State.PAUSED) {
+                sendRendererState(current == AssistantStateMachine.State.INITIALIZING
+                        ? "DISCONNECTED" : current.name());
+            }
         }
         return accepted;
     }
@@ -427,6 +432,21 @@ public final class MainActivity extends Activity {
                 transition(AssistantStateMachine.Event.FAILURE);
             }
         });
+        addSpace(root, 10);
+        openRenderer = action("Open UE 3D Avatar", Color.rgb(22, 91, 112));
+        openRenderer.setTag("zeaz:open-renderer");
+        root.addView(openRenderer, new LinearLayout.LayoutParams(-1, dp(48)));
+        openRenderer.setOnClickListener(v -> {
+            try {
+                if (!HumandroidRendererBridge.launch(this,
+                        assistantState.state() == AssistantStateMachine.State.THINKING ? "THINKING" : "IDLE")) {
+                    Toast.makeText(this, "Install the Humandroid renderer app first", Toast.LENGTH_SHORT).show();
+                }
+            } catch (SecurityException ex) {
+                Toast.makeText(this, "Could not open the renderer. Check its install and signing configuration.",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
         addSpace(root, 24);
         addWorkflowBuilder(root);
         addSpace(root, 20);
@@ -457,6 +477,15 @@ public final class MainActivity extends Activity {
         if (intelligence != null) {
             intelligence.setEnabled(!value);
             intelligence.setAlpha(value ? 0.6f : 1f);
+        }
+    }
+
+    private void sendRendererState(String state) {
+        if (destroyed) return;
+        try {
+            HumandroidRendererBridge.sendState(this, state, 0.0f);
+        } catch (SecurityException ignored) {
+            // The optional renderer must not block the native assistant when signatures differ.
         }
     }
 
