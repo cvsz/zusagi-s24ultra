@@ -14,7 +14,7 @@ The six Humandroid video references are visual inspiration, not evidence of func
 
 ## Milestones
 - M1: Android stability and insets (existing PR #8).
-- M2: Lightweight procedural HUD state machine (initial implementation in PR #8; not a full humanoid 3D avatar).
+- M2: Procedural 3D wireframe bust projected into the native Canvas HUD; deterministic full assistant state machine remains a separate incomplete milestone.
 - M3: Speech lifecycle integration, error recovery, tests.
 - M4: Authenticated streaming AI Gateway, memory consent and observability.
 - M5: Read-only zworkforce dashboard and approved commands.

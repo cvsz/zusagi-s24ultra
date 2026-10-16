@@ -119,6 +119,17 @@ public final class MainActivityInstrumentedTest {
     assertTrue("The HUD should draw gold facial contours", goldPixels > 10);
   }
 
+  @Test public void humanoidPoseChangesOverTime() {
+    float initialPose = JarvisHudView.HumanoidMesh.headYawAt(0f, JarvisHudView.State.IDLE);
+    float laterPose = JarvisHudView.HumanoidMesh.headYawAt(2f, JarvisHudView.State.IDLE);
+    assertTrue("The avatar should change its head pose over time",
+        Math.abs(laterPose - initialPose) > 0.05f);
+    float listeningPose = JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.LISTENING);
+    float thinkingPose = JarvisHudView.HumanoidMesh.headYawAt(1f, JarvisHudView.State.THINKING);
+    assertTrue("Listening and thinking should have distinct motion profiles",
+        Math.abs(listeningPose - thinkingPose) > 0.05f);
+  }
+
   private static int backgroundColor(View view) {
     assertTrue("Expected a solid-color background", view.getBackground() instanceof ColorDrawable);
     return ((ColorDrawable) view.getBackground()).getColor();

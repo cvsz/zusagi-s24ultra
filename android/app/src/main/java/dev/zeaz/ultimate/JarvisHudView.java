@@ -10,6 +10,7 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.view.View;
 import android.provider.Settings;
+import java.util.ArrayList;
 
 /**
  * Lightweight animated, depth-inspired AI HUD. Rendering is decorative only:
@@ -22,8 +23,8 @@ public final class JarvisHudView extends View {
     private static final Typeface LOGO_TYPEFACE = Typeface.create("sans-serif-medium", Typeface.BOLD);
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF oval = new RectF();
-    private final android.graphics.Path shouldersPath = new android.graphics.Path();
-    private final android.graphics.Path facePath = new android.graphics.Path();
+    private final HumanoidMesh humanoidMesh = HumanoidMesh.create();
+    private final Paint humanoidPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private Shader backdropShader;
     private long epoch = android.os.SystemClock.uptimeMillis();
     private boolean active = true;
@@ -146,7 +147,7 @@ public final class JarvisHudView extends View {
         canvas.drawCircle(x, y, (31 + 3 * pulse) * unit, paint);
         paint.setColor(Color.argb(110, 58, 217, 255));
         canvas.drawCircle(x, y, 22 * unit, paint);
-        drawHumanoid(canvas, x, y, unit, cyan, pulse);
+        drawHumanoid3d(canvas, x, y, unit, cyan);
         paint.setColor(Color.WHITE);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setTypeface(LOGO_TYPEFACE);
@@ -165,62 +166,205 @@ public final class JarvisHudView extends View {
         }
     }
 
-    private void drawHumanoid(Canvas canvas, float x, float y, float unit, int cyan, float pulse) {
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeCap(Paint.Cap.ROUND);
-        paint.setStrokeJoin(Paint.Join.ROUND);
+    private void drawHumanoid3d(Canvas canvas, float centerX, float centerY, float unit, int cyan) {
+        float seconds = motionEnabled()
+                ? (android.os.SystemClock.uptimeMillis() - epoch) / 1000f : 0f;
+        humanoidMesh.project(centerX, centerY, unit, seconds, state);
+        humanoidPaint.setStyle(Paint.Style.STROKE);
+        humanoidPaint.setStrokeCap(Paint.Cap.ROUND);
+        humanoidPaint.setStrokeWidth(0.85f * unit);
+        humanoidPaint.setColor(Color.argb(165, Color.red(cyan), Color.green(cyan), Color.blue(cyan)));
+        canvas.drawLines(humanoidMesh.projectedCyan, humanoidPaint);
+        humanoidPaint.setStrokeWidth(1.15f * unit);
+        humanoidPaint.setColor(Color.argb(215, 255, 188, 87));
+        canvas.drawLines(humanoidMesh.projectedGold, humanoidPaint);
+    }
 
-        // Original 2D contour bust, deliberately independent of camera and model assets.
-        paint.setStrokeWidth(1.8f * unit);
-        paint.setColor(Color.argb(220, Color.red(cyan), Color.green(cyan), Color.blue(cyan)));
-        oval.set(x - 31 * unit, y - 57 * unit, x + 31 * unit, y + 16 * unit);
-        canvas.drawOval(oval, paint);
+    /** A small procedural 3D wireframe, projected with perspective into the native Canvas. */
+    static final class HumanoidMesh {
+        private static final float CAMERA_DISTANCE = 250f;
+        private static final float FOCAL_LENGTH = 250f;
+        private final float[] vertices;
+        private final int[] cyanEdges;
+        private final int[] goldEdges;
+        private final byte[] cyanZones;
+        final float[] projectedCyan;
+        final float[] projectedGold;
 
-        android.graphics.Path shoulders = shouldersPath;
-        shoulders.reset();
-        shoulders.moveTo(x - 31 * unit, y + 5 * unit);
-        shoulders.cubicTo(x - 38 * unit, y + 18 * unit,
-                x - 66 * unit, y + 13 * unit, x - 75 * unit, y + 47 * unit);
-        shoulders.cubicTo(x - 80 * unit, y + 57 * unit,
-                x - 79 * unit, y + 70 * unit, x - 70 * unit, y + 74 * unit);
-        shoulders.lineTo(x + 70 * unit, y + 74 * unit);
-        shoulders.cubicTo(x + 79 * unit, y + 70 * unit,
-                x + 80 * unit, y + 57 * unit, x + 75 * unit, y + 47 * unit);
-        shoulders.cubicTo(x + 66 * unit, y + 13 * unit,
-                x + 38 * unit, y + 18 * unit, x + 31 * unit, y + 5 * unit);
-        canvas.drawPath(shoulders, paint);
-
-        // Parallel contour lines suggest a holographic wireframe without a 3D engine.
-        for (int index = 0; index < 7; index++) {
-            float offset = index * 8 * unit;
-            float halfWidth = (27 - index * 2.2f) * unit;
-            float lineY = y - 44 * unit + offset;
-            float curve = (float) Math.sqrt(Math.max(0f, 1f - (offset - 28 * unit)
-                    * (offset - 28 * unit) / (30f * 30f * unit * unit)));
-            paint.setStrokeWidth((0.7f + (index == 3 ? pulse * 0.55f : 0f)) * unit);
-            paint.setColor(Color.argb(75 + index * 18, Color.red(cyan),
-                    Color.green(cyan), Color.blue(cyan)));
-            canvas.drawArc(x - halfWidth * curve, lineY - 4 * unit,
-                    x + halfWidth * curve, lineY + 4 * unit, 180, 180, false, paint);
+        private HumanoidMesh(MeshBuilder builder) {
+            vertices = toFloatArray(builder.vertices);
+            cyanEdges = toIntArray(builder.cyanEdges);
+            goldEdges = toIntArray(builder.goldEdges);
+            cyanZones = toByteArray(builder.cyanZones);
+            projectedCyan = new float[cyanEdges.length * 2];
+            projectedGold = new float[goldEdges.length * 2];
         }
 
-        paint.setStrokeWidth(1.2f * unit);
-        paint.setColor(Color.argb(190, 255, 188, 87));
-        android.graphics.Path face = facePath;
-        face.reset();
-        face.moveTo(x - 15 * unit, y - 23 * unit);
-        face.cubicTo(x - 13 * unit, y - 8 * unit, x - 9 * unit, y + 2 * unit,
-                x, y + 4 * unit);
-        face.cubicTo(x + 9 * unit, y + 2 * unit, x + 13 * unit, y - 8 * unit,
-                x + 15 * unit, y - 23 * unit);
-        canvas.drawPath(face, paint);
+        static HumanoidMesh create() {
+            MeshBuilder builder = new MeshBuilder();
+            builder.addEllipsoid(0f, -48f, 0f, 69f, 46f, 29f, 10, 20, (byte) 0);
+            builder.addEllipsoid(0f, 2f, 0f, 15f, 25f, 15f, 8, 16, (byte) 0);
+            builder.addEllipsoid(0f, 54f, 0f, 29f, 36f, 23f, 12, 24, (byte) 1);
+            builder.addFaceContours();
+            return new HumanoidMesh(builder);
+        }
 
-        paint.setStrokeWidth(1f * unit);
-        paint.setColor(Color.argb(125, 255, 188, 87));
-        canvas.drawLine(x - 23 * unit, y + 30 * unit, x + 23 * unit, y + 30 * unit, paint);
-        canvas.drawLine(x - 34 * unit, y + 46 * unit, x + 34 * unit, y + 46 * unit, paint);
-        canvas.drawLine(x - 45 * unit, y + 62 * unit, x + 45 * unit, y + 62 * unit, paint);
+        void project(float centerX, float centerY, float unit, float seconds, State state) {
+            float yaw = headYawAt(seconds, state);
+            float bodyYaw = 0.035f * (float) Math.sin(seconds * 0.45f);
+            float breathAmplitude = state == State.SPEAKING ? 0.024f : 0.012f;
+            float breathRate = state == State.SPEAKING ? 2.8f : 1.1f;
+            float breathing = 1f + breathAmplitude * (float) Math.sin(seconds * breathRate);
+            projectEdges(cyanEdges, cyanZones, projectedCyan,
+                    centerX, centerY, unit, yaw, bodyYaw, breathing, false);
+            projectEdges(goldEdges, null, projectedGold,
+                    centerX, centerY, unit, yaw, bodyYaw, breathing, true);
+        }
+
+        static float headYawAt(float seconds, State state) {
+            float amplitude = state == State.LISTENING ? 0.15f
+                    : state == State.THINKING ? 0.06f
+                    : state == State.SPEAKING ? 0.08f
+                    : state == State.ERROR ? 0.035f : 0.10f;
+            float rate = state == State.LISTENING ? 1.25f
+                    : state == State.THINKING ? 0.42f
+                    : state == State.SPEAKING ? 1.7f
+                    : state == State.ERROR ? 0.25f : 0.75f;
+            return amplitude * (float) Math.sin(seconds * rate);
+        }
+
+        private void projectEdges(int[] edges, byte[] zones, float[] output,
+                                  float centerX, float centerY, float unit, float headYaw,
+                                  float bodyYaw, float breathing, boolean gold) {
+            for (int edge = 0; edge < edges.length / 2; edge++) {
+                for (int end = 0; end < 2; end++) {
+                    int vertex = edges[edge * 2 + end];
+                    int offset = vertex * 3;
+                    float x = vertices[offset];
+                    float y = vertices[offset + 1];
+                    float z = vertices[offset + 2];
+                    boolean isHead = gold || (zones != null && zones[edge] == 1);
+                    float yaw = isHead ? headYaw : bodyYaw;
+                    if (isHead) {
+                        float relativeY = y - 54f;
+                        y = 54f + relativeY * (1f + (breathing - 1f) * 0.3f);
+                    } else {
+                        y *= breathing;
+                    }
+                    float cos = (float) Math.cos(yaw), sin = (float) Math.sin(yaw);
+                    float rotatedX = x * cos + z * sin;
+                    float rotatedZ = -x * sin + z * cos;
+                    float perspective = FOCAL_LENGTH / (CAMERA_DISTANCE - rotatedZ);
+                    float depthScale = perspective * unit;
+                    int projectedOffset = edge * 4 + end * 2;
+                    output[projectedOffset] = centerX + rotatedX * depthScale;
+                    output[projectedOffset + 1] = centerY - y * depthScale;
+                }
+            }
+        }
+
+        private static float[] toFloatArray(ArrayList<Float> values) {
+            float[] result = new float[values.size()];
+            for (int index = 0; index < result.length; index++) result[index] = values.get(index);
+            return result;
+        }
+
+        private static int[] toIntArray(ArrayList<Integer> values) {
+            int[] result = new int[values.size()];
+            for (int index = 0; index < result.length; index++) result[index] = values.get(index);
+            return result;
+        }
+
+        private static byte[] toByteArray(ArrayList<Byte> values) {
+            byte[] result = new byte[values.size()];
+            for (int index = 0; index < result.length; index++) result[index] = values.get(index);
+            return result;
+        }
+    }
+
+    private static final class MeshBuilder {
+        final ArrayList<Float> vertices = new ArrayList<>();
+        final ArrayList<Integer> cyanEdges = new ArrayList<>();
+        final ArrayList<Integer> goldEdges = new ArrayList<>();
+        final ArrayList<Byte> cyanZones = new ArrayList<>();
+
+        void addEllipsoid(float cx, float cy, float cz, float rx, float ry, float rz,
+                          int latitudeSteps, int longitudeSteps, byte zone) {
+            int[][] points = new int[latitudeSteps + 1][longitudeSteps];
+            for (int latitude = 0; latitude <= latitudeSteps; latitude++) {
+                double phi = -Math.PI / 2.0 + Math.PI * latitude / latitudeSteps;
+                for (int longitude = 0; longitude < longitudeSteps; longitude++) {
+                    double theta = 2.0 * Math.PI * longitude / longitudeSteps;
+                    float x = cx + rx * (float) Math.cos(phi) * (float) Math.cos(theta);
+                    float y = cy + ry * (float) Math.sin(phi);
+                    float z = cz + rz * (float) Math.cos(phi) * (float) Math.sin(theta);
+                    points[latitude][longitude] = addVertex(x, y, z);
+                }
+            }
+            for (int latitude = 1; latitude < latitudeSteps; latitude++) {
+                for (int longitude = 0; longitude < longitudeSteps; longitude++) {
+                    addCyanEdge(points[latitude][longitude],
+                            points[latitude][(longitude + 1) % longitudeSteps], zone);
+                }
+            }
+            for (int longitude = 0; longitude < longitudeSteps; longitude++) {
+                for (int latitude = 0; latitude < latitudeSteps; latitude++) {
+                    addCyanEdge(points[latitude][longitude], points[latitude + 1][longitude], zone);
+                }
+            }
+        }
+
+        void addFaceContours() {
+            final int segments = 18;
+            for (int row = 0; row < 7; row++) {
+                float y = 74f - row * 6.2f;
+                float halfWidth = 8f + row * 1.2f;
+                int previous = -1;
+                for (int step = 0; step <= segments; step++) {
+                    float x = -halfWidth + 2f * halfWidth * step / segments;
+                    float normalized = x / 30f;
+                    float normalizedY = (y - 54f) / 36f;
+                    float z = 23f * (float) Math.sqrt(Math.max(0.05f,
+                            1f - normalized * normalized - normalizedY * normalizedY)) + 0.8f;
+                    int current = addVertex(x, y, z);
+                    if (previous >= 0) {
+                        goldEdges.add(previous);
+                        goldEdges.add(current);
+                    }
+                    previous = current;
+                }
+            }
+            for (int side = -1; side <= 1; side += 2) {
+                int previous = -1;
+                for (int step = 0; step <= 16; step++) {
+                    float y = 76f - step * 2.8f;
+                    float x = side * (11f + 0.2f * step);
+                    float normalized = x / 29f;
+                    float normalizedY = (y - 54f) / 36f;
+                    float z = 23f * (float) Math.sqrt(Math.max(0.05f,
+                            1f - normalized * normalized - normalizedY * normalizedY)) + 1.1f;
+                    int current = addVertex(x, y, z);
+                    if (previous >= 0) {
+                        goldEdges.add(previous);
+                        goldEdges.add(current);
+                    }
+                    previous = current;
+                }
+            }
+        }
+
+        private int addVertex(float x, float y, float z) {
+            int index = vertices.size() / 3;
+            vertices.add(x);
+            vertices.add(y);
+            vertices.add(z);
+            return index;
+        }
+
+        private void addCyanEdge(int first, int second, byte zone) {
+            cyanEdges.add(first);
+            cyanEdges.add(second);
+            cyanZones.add(zone);
+        }
     }
 }
