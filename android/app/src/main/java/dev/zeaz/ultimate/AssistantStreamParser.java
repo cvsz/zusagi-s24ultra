@@ -11,6 +11,9 @@ import org.json.JSONObject;
 public final class AssistantStreamParser {
   private static final int MAX_LINE_BYTES = 16384;
   private static final int MAX_STREAM_BYTES = 524288;
+  private static final long MAX_STREAM_DURATION_NANOS = 120_000_000_000L;
+
+  interface NanoClock { long now(); }
 
   public interface DeltaConsumer {
     void accept(String text);
@@ -19,8 +22,14 @@ public final class AssistantStreamParser {
   private AssistantStreamParser() {}
 
   public static int parse(InputStream input, DeltaConsumer consumer) throws IOException {
+    return parse(input, consumer, System::nanoTime, MAX_STREAM_DURATION_NANOS);
+  }
+
+  static int parse(InputStream input, DeltaConsumer consumer, NanoClock clock,
+                   long maxDurationNanos) throws IOException {
     if (input == null || consumer == null) throw new IllegalArgumentException("Input and consumer required");
-    BoundedLines lines = new BoundedLines(input);
+    if (clock == null || maxDurationNanos <= 0) throw new IllegalArgumentException("Valid stream duration required");
+    BoundedLines lines = new BoundedLines(input, clock, maxDurationNanos);
     String event = null;
     String data = null;
     int expectedSequence = 0;
@@ -71,21 +80,37 @@ public final class AssistantStreamParser {
 
   private static final class BoundedLines {
     private final InputStream input;
+    private final NanoClock clock;
+    private final long startedAt;
+    private final long maxDurationNanos;
     private int total;
 
-    BoundedLines(InputStream input) { this.input = input; }
+    BoundedLines(InputStream input, NanoClock clock, long maxDurationNanos) {
+      this.input = input;
+      this.clock = clock;
+      this.startedAt = clock.now();
+      this.maxDurationNanos = maxDurationNanos;
+    }
 
     String readLine() throws IOException {
       ByteArrayOutputStream bytes = new ByteArrayOutputStream();
       boolean sawByte = false;
       while (true) {
+        checkDuration();
         int value = input.read();
+        checkDuration();
         if (value < 0) return sawByte ? decode(bytes) : null;
         sawByte = true;
         if (++total > MAX_STREAM_BYTES) throw new IOException("Gateway stream too large");
         if (value == '\n') return decode(bytes);
         if (bytes.size() >= MAX_LINE_BYTES) throw new IOException("Gateway stream line too large");
         bytes.write(value);
+      }
+    }
+
+    private void checkDuration() throws IOException {
+      if (clock.now() - startedAt >= maxDurationNanos) {
+        throw new IOException("Gateway stream duration exceeded");
       }
     }
 

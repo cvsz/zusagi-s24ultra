@@ -445,7 +445,7 @@ public final class MainActivity extends Activity {
                 if (destroyed || generation != requestGeneration) return;
                 connection.setInstanceFollowRedirects(false);
                 connection.setConnectTimeout(10000);
-                connection.setReadTimeout(45000);
+                connection.setReadTimeout(15000);
                 connection.setRequestMethod("POST");
                 connection.setDoOutput(true);
                 connection.setRequestProperty("Authorization", "Bearer " + credential);

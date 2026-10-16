@@ -128,6 +128,23 @@ class GatewayTests(unittest.TestCase):
         self.assertIn('event: error\ndata: {"error": "invalid_upstream_response"}', result["body"])
         self.assertNotIn("event: done", result["body"])
 
+    def test_chat_stream_enforces_total_upstream_deadline(self):
+        elapsed = [0.0]
+
+        class SlowStream(io.BytesIO):
+            def readline(self, size=-1):
+                elapsed[0] = 121.0
+                return super().readline(size)
+
+        with patch("gateway.server.open_upstream", return_value=SlowStream(
+                b'data: {"choices":[{"delta":{"content":"late"}}]}\n\n')):
+            with patch("gateway.server.time.monotonic", side_effect=lambda: elapsed[0]):
+                result = self.request("/v1/chat", b'{"message":"hi"}', "Bearer " + "x" * 24,
+                                      {"Accept": "text/event-stream",
+                                       "X-ZEAZ-Stream-Version": "1"})
+        self.assertEqual(result["status"], 502)
+        self.assertEqual(result["error"], "upstream_unavailable")
+
     def request(self, path, body, authorization, extra_headers=None):
         class FakeHandler(Handler):
             def __init__(self):

@@ -7,6 +7,7 @@ import json
 import os
 import ipaddress
 import ssl
+import time
 from itertools import chain
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
@@ -18,6 +19,8 @@ MAX_MESSAGE = 4000
 MAX_UPSTREAM = 262144
 MAX_SSE_LINE = 16384
 MAX_STREAM_OUTPUT = 524288
+MAX_STREAM_SECONDS = 120
+STREAM_READ_TIMEOUT = 10
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -25,9 +28,9 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def open_upstream(request):
+def open_upstream(request, timeout=30):
     opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
-    return opener.open(request, timeout=30)
+    return opener.open(request, timeout=timeout)
 
 
 SYSTEM_PROMPT = (
@@ -105,12 +108,17 @@ def iter_reply_chunks(message, settings):
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
         method="POST",
     )
-    response = open_upstream(req)
+    deadline = time.monotonic() + MAX_STREAM_SECONDS
+    response = open_upstream(req, timeout=STREAM_READ_TIMEOUT)
     total = 0
     terminated = False
     try:
         while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Upstream stream duration exceeded")
             line = response.readline(MAX_SSE_LINE + 1)
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Upstream stream duration exceeded")
             if not line:
                 break
             total += len(line)

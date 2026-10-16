@@ -77,6 +77,22 @@ public final class MainActivityInstrumentedTest {
         + repeat('x', 17000) + "\"}\n\n");
   }
 
+  @Test public void assistantStreamParserEnforcesTotalDuration() throws Exception {
+    long[] elapsed = {0};
+    ByteArrayInputStream slow = new ByteArrayInputStream(new byte[] {'x'}) {
+      @Override public synchronized int read() {
+        elapsed[0] = 11;
+        return super.read();
+      }
+    };
+    try {
+      AssistantStreamParser.parse(slow, ignored -> {}, () -> elapsed[0], 10);
+      fail("Slow stream must exceed its total duration");
+    } catch (IOException expected) {
+      assertTrue(expected.getMessage().contains("duration"));
+    }
+  }
+
   private static void assertStreamRejected(String stream) throws Exception {
     try {
       AssistantStreamParser.parse(new ByteArrayInputStream(
