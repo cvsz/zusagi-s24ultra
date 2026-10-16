@@ -442,6 +442,7 @@ public final class MainActivity extends Activity {
             try {
                 connection = (HttpURLConnection) target.openConnection();
                 activeChatConnection = connection;
+                if (destroyed || generation != requestGeneration) return;
                 connection.setInstanceFollowRedirects(false);
                 connection.setConnectTimeout(10000);
                 connection.setReadTimeout(45000);
@@ -456,8 +457,8 @@ public final class MainActivity extends Activity {
                 int code = connection.getResponseCode();
                 if (code >= 200 && code < 300) {
                     String contentType = connection.getContentType();
-                    if (contentType == null || !contentType.toLowerCase(Locale.ROOT)
-                            .startsWith("text/event-stream")) {
+                    if (contentType == null || !"text/event-stream".equalsIgnoreCase(
+                            contentType.split(";", 2)[0].trim())) {
                         throw new IllegalStateException("Unexpected gateway response type");
                     }
                     try (InputStream stream = connection.getInputStream()) {
