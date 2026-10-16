@@ -29,12 +29,25 @@ Android configuration:
 - Device token: the separately provisioned `ZEAZ_GATEWAY_TOKEN`
 - Send: `POST /v1/chat` with `{"message":"..."}`, response `{"reply":"..."}`
 
+For incremental chat responses, negotiate **SSE protocol v1** on the same authenticated route by sending both `Accept: text/event-stream` and `X-ZEAZ-Stream-Version: 1`. The Gateway emits UTF-8 server-sent events:
+
+```text
+event: delta
+data: {"sequence":0,"text":"..."}
+
+event: done
+data: {"sequence":1}
+
+```
+
+Each `delta` sequence starts at zero and increases by one. The `done` sequence is the number of deltas and is mandatory. A sanitized `event: error` can follow deltas if the upstream fails. Clients must reject missing, duplicated, out-of-order, malformed, or oversized events and discard any incomplete answer. The Android client caps a stream at 512 KiB and an individual line at 16 KiB. The Gateway caps provider stream bytes at 256 KiB and serialized client events at 512 KiB. Legacy JSON clients that omit both negotiation headers retain the JSON response contract; partial negotiation is rejected with 406.
+
 The token-advisory action sends `POST /v1/analyze` with `{"token":{"chain":"...","symbol":"...","address":"..."}}` and a bearer device token. The Android client rejects redirects, limits responses to 256 KiB, and requires numeric `opportunity`, `risk`, and `confidence` values plus non-empty `action` and `rug_risk` strings. These client checks do not authenticate or secure the analysis service. The gateway in this repository has no `/v1/analyze` route; do not expose an external analyzer publicly until its authentication, authorization, rate limits, tenant isolation, and routing have been verified independently.
 
 ## Limitations and release gates
 
 - Static bearer token is suitable only for controlled development; replace with expiring per-device credentials and revocation before production.
-- No tool execution, multi-agent planning, durable memory, streaming, push notifications, or background actions.
+- No tool execution, multi-agent planning, durable memory, push notifications, or background actions. SSE v1 streams chat text only; it does not stream tool events or authorize actions.
 - Gateway currently depends on the configured provider's OpenAI-compatible response contract.
 - Require TLS, proxy rate limits, provider allowlisting, operational logs with redaction, concurrency limits, and device integration tests before production.
 - Test actual S24 Ultra installation, network failure, authentication failure, voice/TTS, and rollback. CI passing alone does not establish device readiness.

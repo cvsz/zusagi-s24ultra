@@ -54,6 +54,45 @@ public final class MainActivityInstrumentedTest {
     focus.release();
   }
 
+  @Test public void assistantStreamParserDeliversOrderedDeltasAndRequiresDone() throws Exception {
+    String events = "event: delta\ndata: {\"sequence\":0,\"text\":\"สวัสดี \"}\n\n"
+        + "event: delta\ndata: {\"sequence\":1,\"text\":\"โลก\"}\n\n"
+        + "event: done\ndata: {\"sequence\":2}\n\n";
+    StringBuilder answer = new StringBuilder();
+    int count = AssistantStreamParser.parse(
+        new ByteArrayInputStream(events.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        answer::append);
+    assertEquals("สวัสดี โลก", answer.toString());
+    assertEquals(2, count);
+  }
+
+  @Test public void assistantStreamParserRejectsOutOfOrderAndUnterminatedEvents() throws Exception {
+    assertStreamRejected("event: delta\ndata: {\"sequence\":1,\"text\":\"gap\"}\n\n"
+        + "event: done\ndata: {\"sequence\":2}\n\n");
+    assertStreamRejected("event: delta\ndata: {\"sequence\":0,\"text\":\"partial\"}\n\n");
+  }
+
+  @Test public void assistantStreamParserBoundsLineAndTotalBytes() throws Exception {
+    assertStreamRejected("event: delta\ndata: {\"sequence\":0,\"text\":\""
+        + repeat('x', 17000) + "\"}\n\n");
+  }
+
+  private static void assertStreamRejected(String stream) throws Exception {
+    try {
+      AssistantStreamParser.parse(new ByteArrayInputStream(
+          stream.getBytes(java.nio.charset.StandardCharsets.UTF_8)), ignored -> {});
+      fail("Malformed or incomplete stream must be rejected");
+    } catch (IOException expected) {
+      assertTrue(expected.getMessage().contains("stream"));
+    }
+  }
+
+  private static String repeat(char value, int count) {
+    StringBuilder result = new StringBuilder(count);
+    for (int index = 0; index < count; index++) result.append(value);
+    return result.toString();
+  }
+
   @Test public void assistantStateMachineAcceptsVoiceAndRequestLifecycle() {
     AssistantStateMachine machine = new AssistantStateMachine();
     assertEquals(AssistantStateMachine.State.INITIALIZING, machine.state());

@@ -2,7 +2,7 @@ import io
 import json
 import unittest
 from unittest.mock import patch
-from gateway.server import Handler, config, MAX_BODY, NoRedirect
+from gateway.server import Handler, config, MAX_BODY, MAX_UPSTREAM, NoRedirect
 
 
 class GatewayTests(unittest.TestCase):
@@ -77,11 +77,63 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(result["status"], 200)
         self.assertEqual(result["reply"], "สวัสดี")
 
-    def request(self, path, body, authorization):
+    def test_chat_stream_negotiation_requires_version_and_accept_header(self):
+        result = self.request("/v1/chat", b'{"message":"hi"}', "Bearer " + "x" * 24,
+                              {"X-ZEAZ-Stream-Version": "1"})
+        self.assertEqual(result["status"], 406)
+
+    def test_chat_stream_returns_ordered_deltas_and_done(self):
+        upstream = io.BytesIO(
+            b'data: {"choices":[{"delta":{"content":"Hello "}}]}\n\n'
+            b'data: {"choices":[{"delta":{"content":"world"}}]}\n\n'
+            b'data: [DONE]\n\n')
+        with patch("gateway.server.open_upstream", return_value=upstream):
+            result = self.request("/v1/chat", b'{"message":"hi"}', "Bearer " + "x" * 24,
+                                  {"Accept": "text/event-stream",
+                                   "X-ZEAZ-Stream-Version": "1"})
+        self.assertEqual(result["status"], 200)
+        self.assertIn('event: delta\ndata: {"sequence": 0, "text": "Hello "}', result["body"])
+        self.assertIn('event: delta\ndata: {"sequence": 1, "text": "world"}', result["body"])
+        self.assertIn('event: done\ndata: {"sequence": 2}', result["body"])
+
+    def test_chat_stream_rejects_malformed_provider_chunk_after_partial_reply(self):
+        upstream = io.BytesIO(
+            b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            b'data: {not-json}\n\n')
+        with patch("gateway.server.open_upstream", return_value=upstream):
+            result = self.request("/v1/chat", b'{"message":"hi"}', "Bearer " + "x" * 24,
+                                  {"Accept": "text/event-stream",
+                                   "X-ZEAZ-Stream-Version": "1"})
+        self.assertEqual(result["status"], 200)
+        self.assertIn('"text": "partial"', result["body"])
+        self.assertIn('event: error\ndata: {"error": "invalid_upstream_response"}', result["body"])
+        self.assertNotIn("not-json", result["body"])
+
+    def test_chat_stream_bounds_provider_bytes(self):
+        upstream = io.BytesIO(b"".join((b":" + b"x" * 7998 + b"\n")
+                                        for _ in range(MAX_UPSTREAM // 8000 + 2)))
+        with patch("gateway.server.open_upstream", return_value=upstream):
+            result = self.request("/v1/chat", b'{"message":"hi"}', "Bearer " + "x" * 24,
+                                  {"Accept": "text/event-stream",
+                                   "X-ZEAZ-Stream-Version": "1"})
+        self.assertEqual(result["status"], 502)
+        self.assertEqual(result["error"], "invalid_upstream_response")
+
+    def test_chat_stream_requires_upstream_done_marker(self):
+        upstream = io.BytesIO(b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n')
+        with patch("gateway.server.open_upstream", return_value=upstream):
+            result = self.request("/v1/chat", b'{"message":"hi"}', "Bearer " + "x" * 24,
+                                  {"Accept": "text/event-stream",
+                                   "X-ZEAZ-Stream-Version": "1"})
+        self.assertIn('event: error\ndata: {"error": "invalid_upstream_response"}', result["body"])
+        self.assertNotIn("event: done", result["body"])
+
+    def request(self, path, body, authorization, extra_headers=None):
         class FakeHandler(Handler):
             def __init__(self):
                 self.path = path
                 self.headers = {"Authorization": authorization, "Content-Length": str(len(body))}
+                self.headers.update(extra_headers or {})
                 self.rfile = io.BytesIO(body)
                 self.wfile = io.BytesIO()
                 self.settings = ("x" * 24, "placeholder", "model", "https://example.com/v1")
@@ -103,7 +155,8 @@ class GatewayTests(unittest.TestCase):
 
         handler = FakeHandler()
         handler.do_POST()
-        return {"status": handler.status, **handler.data}
+        return {"status": handler.status, **getattr(handler, "data", {}),
+                "body": handler.wfile.getvalue().decode("utf-8", errors="replace")}
 
 
 if __name__ == "__main__":

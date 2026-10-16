@@ -7,6 +7,7 @@ import json
 import os
 import ipaddress
 import ssl
+from itertools import chain
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -15,6 +16,8 @@ from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHand
 MAX_BODY = 8192
 MAX_MESSAGE = 4000
 MAX_UPSTREAM = 262144
+MAX_SSE_LINE = 16384
+MAX_STREAM_OUTPUT = 524288
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -86,6 +89,62 @@ def generate_reply(message, settings):
     return answer
 
 
+def iter_reply_chunks(message, settings):
+    _, key, model, base = settings
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": message},
+        ],
+        "stream": True,
+    }).encode("utf-8")
+    req = Request(
+        base + "/chat/completions",
+        data=payload,
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+        method="POST",
+    )
+    response = open_upstream(req)
+    total = 0
+    terminated = False
+    try:
+        while True:
+            line = response.readline(MAX_SSE_LINE + 1)
+            if not line:
+                break
+            total += len(line)
+            if len(line) > MAX_SSE_LINE or total > MAX_UPSTREAM:
+                raise ValueError("Upstream stream too large")
+            line = line.strip()
+            if not line or line.startswith(b":") or not line.startswith(b"data:"):
+                continue
+            data = line[5:].strip()
+            if data == b"[DONE]":
+                terminated = True
+                break
+            item = json.loads(data)
+            choices = item.get("choices") if isinstance(item, dict) else None
+            if not isinstance(choices, list):
+                raise ValueError("Invalid upstream stream")
+            if not choices:
+                continue
+            delta = choices[0].get("delta") if isinstance(choices[0], dict) else None
+            if not isinstance(delta, dict):
+                raise ValueError("Invalid upstream stream")
+            text = delta.get("content", "")
+            if text is None:
+                continue
+            if not isinstance(text, str):
+                raise ValueError("Invalid upstream stream")
+            if text:
+                yield text
+        if not terminated:
+            raise ValueError("Upstream stream ended without a terminator")
+    finally:
+        response.close()
+
+
 class Handler(BaseHTTPRequestHandler):
     settings = None
 
@@ -106,6 +165,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/v1/chat":
             return self.respond(404, {"error": "not_found"})
+        stream_version = self.headers.get("X-ZEAZ-Stream-Version")
+        accepts_stream = "text/event-stream" in self.headers.get("Accept", "").lower()
+        if stream_version is not None or accepts_stream:
+            if stream_version != "1" or not accepts_stream:
+                return self.respond(406, {"error": "unsupported_stream_version"})
+            streaming = True
+        else:
+            streaming = False
         auth = self.headers.get("Authorization", "")
         if not isinstance(auth, str) or not hmac.compare_digest(auth, "Bearer " + self.settings[0]):
             return self.respond(401, {"error": "unauthorized"})
@@ -123,12 +190,75 @@ class Handler(BaseHTTPRequestHandler):
             message = data.get("message") if isinstance(data, dict) else None
             if not isinstance(message, str) or not message.strip() or len(message) > MAX_MESSAGE:
                 return self.respond(400, {"error": "invalid_message"})
+            if streaming:
+                return self.stream_reply(message, self.settings)
             reply = generate_reply(message, self.settings)
         except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
             return self.respond(502, {"error": "invalid_upstream_response"})
         except (HTTPError, URLError, TimeoutError, OSError):
             return self.respond(502, {"error": "upstream_unavailable"})
         return self.respond(200, {"reply": reply})
+
+    def write_sse(self, event, data):
+        body = ("event: " + event + "\ndata: "
+                + json.dumps(data, ensure_ascii=False) + "\n\n").encode("utf-8")
+        self.wfile.write(body)
+        self.wfile.flush()
+        return len(body)
+
+    def write_stream_error(self, sent, code):
+        body = ("event: error\ndata: "
+                + json.dumps({"error": code}, ensure_ascii=False) + "\n\n").encode("utf-8")
+        if sent + len(body) <= MAX_STREAM_OUTPUT:
+            self.wfile.write(body)
+            self.wfile.flush()
+
+    def stream_reply(self, message, settings):
+        chunks = iter_reply_chunks(message, settings)
+        try:
+            first = next(chunks)
+        except StopIteration:
+            return self.respond(502, {"error": "invalid_upstream_response"})
+        except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+            return self.respond(502, {"error": "invalid_upstream_response"})
+        except (HTTPError, URLError, TimeoutError, OSError):
+            return self.respond(502, {"error": "upstream_unavailable"})
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        sequence = 0
+        sent = 0
+        try:
+            for text in chain((first,), chunks):
+                event_size = len(("event: delta\ndata: " + json.dumps(
+                    {"sequence": sequence, "text": text}, ensure_ascii=False) + "\n\n").encode("utf-8"))
+                if sent + event_size > MAX_STREAM_OUTPUT:
+                    raise ValueError("Stream response too large")
+                sent += self.write_sse("delta", {"sequence": sequence, "text": text})
+                sequence += 1
+            done_size = len(("event: done\ndata: " + json.dumps({"sequence": sequence}) + "\n\n").encode("utf-8"))
+            if sent + done_size > MAX_STREAM_OUTPUT:
+                raise ValueError("Stream response too large")
+            self.write_sse("done", {"sequence": sequence})
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+            try:
+                self.write_stream_error(sent, "invalid_upstream_response")
+            except OSError:
+                pass
+        except (HTTPError, URLError, TimeoutError, OSError):
+            try:
+                self.write_stream_error(sent, "upstream_unavailable")
+            except OSError:
+                pass
+        finally:
+            chunks.close()
 
     def log_message(self, format, *args):
         # Never log user messages, authorization headers, or provider responses.

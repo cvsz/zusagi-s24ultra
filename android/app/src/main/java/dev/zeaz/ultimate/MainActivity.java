@@ -48,6 +48,7 @@ public final class MainActivity extends Activity {
     private boolean destroyed = false;
     private boolean ttsInitialized = false;
     private boolean speechActive = false;
+    private volatile HttpURLConnection activeChatConnection;
     private int requestGeneration = 0;
     private long utteranceGeneration = 0;
     private String activeUtteranceId;
@@ -435,10 +436,12 @@ public final class MainActivity extends Activity {
         final int generation = ++requestGeneration;
         new Thread(() -> {
             HttpURLConnection connection = null;
+            StringBuilder streamedAnswer = new StringBuilder();
             String answer;
             boolean success = false;
             try {
                 connection = (HttpURLConnection) target.openConnection();
+                activeChatConnection = connection;
                 connection.setInstanceFollowRedirects(false);
                 connection.setConnectTimeout(10000);
                 connection.setReadTimeout(45000);
@@ -446,30 +449,46 @@ public final class MainActivity extends Activity {
                 connection.setDoOutput(true);
                 connection.setRequestProperty("Authorization", "Bearer " + credential);
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                connection.setRequestProperty("Accept", "text/event-stream");
+                connection.setRequestProperty("X-ZEAZ-Stream-Version", "1");
                 byte[] payload = new JSONObject().put("message", message).toString().getBytes(StandardCharsets.UTF_8);
                 try (OutputStream os = connection.getOutputStream()) { os.write(payload); }
                 int code = connection.getResponseCode();
                 if (code >= 200 && code < 300) {
-                    try (InputStream stream = connection.getInputStream()) {
-                        byte[] buffer = new byte[262145];
-                        int count = 0, read;
-                        while ((read = stream.read(buffer, count, buffer.length - count)) > 0) {
-                            count += read;
-                            if (count >= buffer.length) throw new IllegalStateException("Response too large");
-                        }
-                        if (count == 0) throw new IllegalStateException("Empty response");
-                        answer = new JSONObject(new String(buffer, 0, count, StandardCharsets.UTF_8)).getString("reply");
-                        if (answer.trim().isEmpty()) throw new IllegalStateException("Empty reply");
+                    String contentType = connection.getContentType();
+                    if (contentType == null || !contentType.toLowerCase(Locale.ROOT)
+                            .startsWith("text/event-stream")) {
+                        throw new IllegalStateException("Unexpected gateway response type");
                     }
+                    try (InputStream stream = connection.getInputStream()) {
+                        AssistantStreamParser.parse(stream, delta -> {
+                            streamedAnswer.append(delta);
+                            String snapshot = streamedAnswer.toString();
+                            runOnUiThread(() -> {
+                                if (destroyed || isFinishing() || generation != requestGeneration) return;
+                                if (assistantState.state() == AssistantStateMachine.State.THINKING) {
+                                    transition(AssistantStateMachine.Event.STREAM_STARTED);
+                                }
+                                status.setText("●  Connected · Streaming response");
+                                output.setText(snapshot);
+                            });
+                        });
+                    }
+                    answer = streamedAnswer.toString();
+                    if (answer.trim().isEmpty()) throw new IllegalStateException("Empty reply");
                     success = true;
                 } else {
                     answer = code == 401 ? "Authentication failed. Check your device token."
                             : "Gateway returned HTTP " + code + ". Check your connection.";
                 }
             } catch (Exception ex) {
-                answer = "Could not reach AI Gateway (" + ex.getClass().getSimpleName() + ").";
+                answer = "Could not complete AI Gateway stream (" + ex.getClass().getSimpleName()
+                        + "). Please retry.";
             } finally {
-                if (connection != null) connection.disconnect();
+                if (connection != null) {
+                    if (activeChatConnection == connection) activeChatConnection = null;
+                    connection.disconnect();
+                }
             }
             final String reply = answer;
             final boolean ok = success;
@@ -525,6 +544,9 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         destroyed = true;
         requestGeneration++;
+        HttpURLConnection connection = activeChatConnection;
+        activeChatConnection = null;
+        if (connection != null) connection.disconnect();
         speechActive = false;
         activeUtteranceId = null;
         speechReady = false;
