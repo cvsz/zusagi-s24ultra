@@ -22,6 +22,8 @@ public final class JarvisHudView extends View {
     private static final Typeface LOGO_TYPEFACE = Typeface.create("sans-serif-medium", Typeface.BOLD);
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF oval = new RectF();
+    private final android.graphics.Path shouldersPath = new android.graphics.Path();
+    private final android.graphics.Path facePath = new android.graphics.Path();
     private Shader backdropShader;
     private long epoch = android.os.SystemClock.uptimeMillis();
     private boolean active = true;
@@ -144,6 +146,7 @@ public final class JarvisHudView extends View {
         canvas.drawCircle(x, y, (31 + 3 * pulse) * unit, paint);
         paint.setColor(Color.argb(110, 58, 217, 255));
         canvas.drawCircle(x, y, 22 * unit, paint);
+        drawHumanoid(canvas, x, y, unit, cyan, pulse);
         paint.setColor(Color.WHITE);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setTypeface(LOGO_TYPEFACE);
@@ -160,5 +163,64 @@ public final class JarvisHudView extends View {
         if (active && resumed && motionEnabled() && getWindowVisibility() == VISIBLE && isShown()) {
             postInvalidateDelayed(40);
         }
+    }
+
+    private void drawHumanoid(Canvas canvas, float x, float y, float unit, int cyan, float pulse) {
+        paint.reset();
+        paint.setAntiAlias(true);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+
+        // Original 2D contour bust, deliberately independent of camera and model assets.
+        paint.setStrokeWidth(1.8f * unit);
+        paint.setColor(Color.argb(220, Color.red(cyan), Color.green(cyan), Color.blue(cyan)));
+        oval.set(x - 31 * unit, y - 57 * unit, x + 31 * unit, y + 16 * unit);
+        canvas.drawOval(oval, paint);
+
+        android.graphics.Path shoulders = shouldersPath;
+        shoulders.reset();
+        shoulders.moveTo(x - 31 * unit, y + 5 * unit);
+        shoulders.cubicTo(x - 38 * unit, y + 18 * unit,
+                x - 66 * unit, y + 13 * unit, x - 75 * unit, y + 47 * unit);
+        shoulders.cubicTo(x - 80 * unit, y + 57 * unit,
+                x - 79 * unit, y + 70 * unit, x - 70 * unit, y + 74 * unit);
+        shoulders.lineTo(x + 70 * unit, y + 74 * unit);
+        shoulders.cubicTo(x + 79 * unit, y + 70 * unit,
+                x + 80 * unit, y + 57 * unit, x + 75 * unit, y + 47 * unit);
+        shoulders.cubicTo(x + 66 * unit, y + 13 * unit,
+                x + 38 * unit, y + 18 * unit, x + 31 * unit, y + 5 * unit);
+        canvas.drawPath(shoulders, paint);
+
+        // Parallel contour lines suggest a holographic wireframe without a 3D engine.
+        for (int index = 0; index < 7; index++) {
+            float offset = index * 8 * unit;
+            float halfWidth = (27 - index * 2.2f) * unit;
+            float lineY = y - 44 * unit + offset;
+            float curve = (float) Math.sqrt(Math.max(0f, 1f - (offset - 28 * unit)
+                    * (offset - 28 * unit) / (30f * 30f * unit * unit)));
+            paint.setStrokeWidth((0.7f + (index == 3 ? pulse * 0.55f : 0f)) * unit);
+            paint.setColor(Color.argb(75 + index * 18, Color.red(cyan),
+                    Color.green(cyan), Color.blue(cyan)));
+            canvas.drawArc(x - halfWidth * curve, lineY - 4 * unit,
+                    x + halfWidth * curve, lineY + 4 * unit, 180, 180, false, paint);
+        }
+
+        paint.setStrokeWidth(1.2f * unit);
+        paint.setColor(Color.argb(190, 255, 188, 87));
+        android.graphics.Path face = facePath;
+        face.reset();
+        face.moveTo(x - 15 * unit, y - 23 * unit);
+        face.cubicTo(x - 13 * unit, y - 8 * unit, x - 9 * unit, y + 2 * unit,
+                x, y + 4 * unit);
+        face.cubicTo(x + 9 * unit, y + 2 * unit, x + 13 * unit, y - 8 * unit,
+                x + 15 * unit, y - 23 * unit);
+        canvas.drawPath(face, paint);
+
+        paint.setStrokeWidth(1f * unit);
+        paint.setColor(Color.argb(125, 255, 188, 87));
+        canvas.drawLine(x - 23 * unit, y + 30 * unit, x + 23 * unit, y + 30 * unit, paint);
+        canvas.drawLine(x - 34 * unit, y + 46 * unit, x + 34 * unit, y + 46 * unit, paint);
+        canvas.drawLine(x - 45 * unit, y + 62 * unit, x + 45 * unit, y + 62 * unit, paint);
     }
 }

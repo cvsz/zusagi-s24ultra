@@ -3,6 +3,8 @@ package dev.zeaz.ultimate;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.view.View;
@@ -91,6 +93,30 @@ public final class MainActivityInstrumentedTest {
     } catch (IOException expected) {
       assertEquals("Response too large", expected.getMessage());
     }
+  }
+
+  @Test public void humanoidHudRendersOriginalCyanAndGoldContours() {
+    JarvisHudView hud = new JarvisHudView(InstrumentationRegistry.getInstrumentation().getTargetContext());
+    hud.setState(JarvisHudView.State.IDLE);
+    hud.measure(View.MeasureSpec.makeMeasureSpec(340, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(220, View.MeasureSpec.EXACTLY));
+    hud.layout(0, 0, 340, 220);
+    hud.setResumed(false);
+    Bitmap bitmap = Bitmap.createBitmap(340, 220, Bitmap.Config.ARGB_8888);
+    hud.draw(new Canvas(bitmap));
+    int cyanPixels = 0;
+    int goldPixels = 0;
+    for (int y = 0; y < bitmap.getHeight(); y++) {
+      for (int x = 0; x < bitmap.getWidth(); x++) {
+        int pixel = bitmap.getPixel(x, y);
+        int red = Color.red(pixel), green = Color.green(pixel), blue = Color.blue(pixel);
+        if (blue > 190 && green > 130 && red < 130) cyanPixels++;
+        if (red > 180 && green > 105 && green < 230 && blue > 35 && blue < 160) goldPixels++;
+      }
+    }
+    bitmap.recycle();
+    assertTrue("The HUD should draw cyan humanoid contours", cyanPixels > 100);
+    assertTrue("The HUD should draw gold facial contours", goldPixels > 10);
   }
 
   private static int backgroundColor(View view) {
