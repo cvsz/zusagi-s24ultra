@@ -24,6 +24,34 @@ import static org.junit.Assert.fail;
 
 @RunWith(AndroidJUnit4.class)
 public final class MainActivityInstrumentedTest {
+  @Test public void assistantStateMachineAcceptsVoiceAndRequestLifecycle() {
+    AssistantStateMachine machine = new AssistantStateMachine();
+    assertEquals(AssistantStateMachine.State.INITIALIZING, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.INITIALIZATION_COMPLETE));
+    assertEquals(AssistantStateMachine.State.DISCONNECTED, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.LISTENING_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.TRANSCRIPTION_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.TRANSCRIPTION_COMPLETED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.REQUEST_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.STREAM_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.RESPONSE_COMPLETED));
+    assertEquals(AssistantStateMachine.State.IDLE, machine.state());
+  }
+
+  @Test public void assistantStateMachineRejectsIllegalTransitionsAndRestoresPausedWork() {
+    AssistantStateMachine machine = new AssistantStateMachine();
+    assertFalse(machine.transition(AssistantStateMachine.Event.REQUEST_STARTED));
+    assertEquals(AssistantStateMachine.State.INITIALIZING, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.INITIALIZATION_COMPLETE));
+    assertTrue(machine.transition(AssistantStateMachine.Event.REQUEST_STARTED));
+    assertTrue(machine.transition(AssistantStateMachine.Event.PAUSE));
+    assertEquals(AssistantStateMachine.State.PAUSED, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.RESPONSE_COMPLETED));
+    assertEquals(AssistantStateMachine.State.PAUSED, machine.state());
+    assertTrue(machine.transition(AssistantStateMachine.Event.RESUME));
+    assertEquals(AssistantStateMachine.State.IDLE, machine.state());
+  }
+
   @Test public void activityUsesDarkViewportAndReadableHeader() throws Exception {
     Intent intent = new Intent(InstrumentationRegistry.getInstrumentation().getTargetContext(), MainActivity.class);
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

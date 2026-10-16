@@ -48,6 +48,9 @@ public final class MainActivity extends Activity {
     private boolean ttsInitialized = false;
     private boolean speechActive = false;
     private int requestGeneration = 0;
+    private long utteranceGeneration = 0;
+    private String activeUtteranceId;
+    private final AssistantStateMachine assistantState = new AssistantStateMachine();
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -58,20 +61,25 @@ public final class MainActivity extends Activity {
             }
         }));
         buildScreen();
+        transition(AssistantStateMachine.Event.INITIALIZATION_COMPLETE);
         if (tts != null) {
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override public void onStart(String utteranceId) {
                     runOnUiThread(() -> {
-                        if (!destroyed && speechActive && hud != null) hud.setState(JarvisHudView.State.SPEAKING);
+                        if (!destroyed && speechActive && utteranceId.equals(activeUtteranceId)) {
+                            transition(AssistantStateMachine.Event.SPEECH_STARTED);
+                        }
                     });
                 }
-                @Override public void onDone(String utteranceId) { resetSpeechHud(); }
-                @Override public void onError(String utteranceId) { resetSpeechHud(); }
-                private void resetSpeechHud() {
+                @Override public void onDone(String utteranceId) { finishSpeech(utteranceId, true); }
+                @Override public void onError(String utteranceId) { finishSpeech(utteranceId, false); }
+                private void finishSpeech(String utteranceId, boolean success) {
                     runOnUiThread(() -> {
-                        if (!destroyed && hud != null) {
+                        if (!destroyed && hud != null && utteranceId.equals(activeUtteranceId)) {
                             speechActive = false;
-                            hud.setState(busy ? JarvisHudView.State.THINKING : JarvisHudView.State.IDLE);
+                            activeUtteranceId = null;
+                            transition(success ? AssistantStateMachine.Event.SPEECH_COMPLETED
+                                    : AssistantStateMachine.Event.FAILURE);
                         }
                     });
                 }
@@ -81,6 +89,30 @@ public final class MainActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(getResources().getDisplayMetrics().density * value);
+    }
+
+    private boolean transition(AssistantStateMachine.Event event) {
+        boolean accepted = assistantState.transition(event);
+        if (hud != null) {
+            AssistantStateMachine.State current = assistantState.state();
+            hud.setState(JarvisHudView.State.valueOf(current.name()));
+        }
+        return accepted;
+    }
+
+    private boolean prepareUserOperation() {
+        if (busy || assistantState.state() == AssistantStateMachine.State.PAUSED
+                || assistantState.state() == AssistantStateMachine.State.INITIALIZING) return false;
+        if (assistantState.state() == AssistantStateMachine.State.ERROR) {
+            transition(AssistantStateMachine.Event.RETRY);
+        }
+        if (assistantState.state() == AssistantStateMachine.State.SPEAKING) {
+            speechActive = false;
+            activeUtteranceId = null;
+            if (tts != null) tts.stop();
+            transition(AssistantStateMachine.Event.CANCEL);
+        }
+        return true;
     }
 
     private GradientDrawable surface(int fill, int radius) {
@@ -244,17 +276,21 @@ public final class MainActivity extends Activity {
         speak = action("Speak response in Thai", Color.rgb(48, 61, 86));
         response.addView(speak, new LinearLayout.LayoutParams(-1, dp(48)));
         speak.setOnClickListener(v -> {
+            if (!prepareUserOperation()) return;
             if (!speechReady || tts == null || destroyed) {
                 Toast.makeText(this, "Thai text-to-speech unavailable", Toast.LENGTH_SHORT).show();
-                if (hud != null) hud.setState(JarvisHudView.State.ERROR);
+                transition(AssistantStateMachine.Event.FAILURE);
                 return;
             }
             speechActive = true;
-            if (hud != null) hud.setState(JarvisHudView.State.SPEAKING);
-            int result = tts.speak(output.getText().toString(), TextToSpeech.QUEUE_FLUSH, null, "zeaz-response");
+            activeUtteranceId = "zeaz-response-" + (++utteranceGeneration);
+            transition(AssistantStateMachine.Event.SPEECH_STARTED);
+            int result = tts.speak(output.getText().toString(), TextToSpeech.QUEUE_FLUSH,
+                    null, activeUtteranceId);
             if (result == TextToSpeech.ERROR) {
                 speechActive = false;
-                if (hud != null) hud.setState(JarvisHudView.State.ERROR);
+                activeUtteranceId = null;
+                transition(AssistantStateMachine.Event.FAILURE);
             }
         });
         addSpace(root, 20);
@@ -263,21 +299,21 @@ public final class MainActivity extends Activity {
     }
 
     private void startVoice() {
+        if (!prepareUserOperation()) return;
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "th-TH");
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         try {
-            if (hud != null) hud.setState(JarvisHudView.State.LISTENING);
+            if (!transition(AssistantStateMachine.Event.LISTENING_STARTED)) return;
             startActivityForResult(intent, VOICE_REQUEST);
         } catch (Exception ex) {
             status.setText("●  Speech recognition unavailable");
-            if (hud != null) hud.setState(JarvisHudView.State.ERROR);
+            transition(AssistantStateMachine.Event.FAILURE);
         }
     }
 
     private void setBusy(boolean value) {
         busy = value;
-        if (hud != null && (value || !speechActive)) hud.setProcessing(value);
         send.setEnabled(!value);
         send.setAlpha(value ? 0.6f : 1f);
         if (intelligence != null) {
@@ -314,6 +350,8 @@ public final class MainActivity extends Activity {
             return;
         }
         getPreferences(MODE_PRIVATE).edit().putString("endpoint", base).apply();
+        if (!prepareUserOperation()
+                || !transition(AssistantStateMachine.Event.REQUEST_STARTED)) return;
         setBusy(true);
         status.setText("●  Analyzing token (advisory only)...");
         output.setText("Retrieving advisory token intelligence...");
@@ -338,6 +376,8 @@ public final class MainActivity extends Activity {
                 output.setText(response);
                 status.setText(ok ? "●  Advisory analysis received" : "●  Advisory analysis failed");
                 setBusy(false);
+                transition(ok ? AssistantStateMachine.Event.RESPONSE_COMPLETED
+                        : AssistantStateMachine.Event.FAILURE);
             });
         }).start();
     }
@@ -365,6 +405,8 @@ public final class MainActivity extends Activity {
             return;
         }
         getPreferences(MODE_PRIVATE).edit().putString("endpoint", base).apply();
+        if (!prepareUserOperation()
+                || !transition(AssistantStateMachine.Event.REQUEST_STARTED)) return;
         setBusy(true);
         status.setText("●  Thinking...");
         output.setText("ZEAZ is preparing a response…");
@@ -414,35 +456,54 @@ public final class MainActivity extends Activity {
                 output.setText(reply);
                 status.setText(ok ? "●  Connected · Response received" : "●  Gateway request failed");
                 setBusy(false);
+                transition(ok ? AssistantStateMachine.Event.RESPONSE_COMPLETED
+                        : AssistantStateMachine.Event.FAILURE);
             });
         }).start();
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == VOICE_REQUEST && hud != null) hud.setState(JarvisHudView.State.IDLE);
         if (requestCode == VOICE_REQUEST && resultCode == RESULT_OK && data != null) {
             ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            if (results != null && !results.isEmpty()) input.setText(results.get(0));
+            if (results != null && !results.isEmpty() && !results.get(0).trim().isEmpty()) {
+                transition(AssistantStateMachine.Event.TRANSCRIPTION_STARTED);
+                input.setText(results.get(0));
+                transition(AssistantStateMachine.Event.TRANSCRIPTION_COMPLETED);
+                status.setText("●  Thai speech recognized");
+            } else {
+                transition(AssistantStateMachine.Event.CANCEL);
+            }
+        } else if (requestCode == VOICE_REQUEST) {
+            transition(AssistantStateMachine.Event.CANCEL);
         }
     }
 
     @Override protected void onResume() {
         super.onResume();
         if (hud != null) hud.setResumed(true);
+        if (assistantState.state() == AssistantStateMachine.State.PAUSED) {
+            transition(AssistantStateMachine.Event.RESUME);
+        }
     }
 
     @Override protected void onPause() {
-        if (hud != null) {
-            hud.setResumed(false);
-            if (hud.getState() == JarvisHudView.State.LISTENING) hud.setState(JarvisHudView.State.IDLE);
+        if (speechActive) {
+            speechActive = false;
+            activeUtteranceId = null;
+            if (tts != null) tts.stop();
+            transition(AssistantStateMachine.Event.CANCEL);
         }
+        if (hud != null) hud.setResumed(false);
+        transition(AssistantStateMachine.Event.PAUSE);
         super.onPause();
     }
 
     @Override protected void onDestroy() {
         destroyed = true;
+        requestGeneration++;
         speechActive = false;
+        activeUtteranceId = null;
         speechReady = false;
         if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
         super.onDestroy();

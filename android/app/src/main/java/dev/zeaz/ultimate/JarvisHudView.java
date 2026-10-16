@@ -28,7 +28,10 @@ public final class JarvisHudView extends View {
     private Shader backdropShader;
     private long epoch = android.os.SystemClock.uptimeMillis();
     private boolean active = true;
-    public enum State { IDLE, LISTENING, THINKING, SPEAKING, ERROR }
+    public enum State {
+        INITIALIZING, DISCONNECTED, IDLE, LISTENING, TRANSCRIBING,
+        THINKING, STREAMING, SPEAKING, ERROR, PAUSED
+    }
     private State state = State.IDLE;
     private boolean resumed = false;
 
@@ -156,10 +159,14 @@ public final class JarvisHudView extends View {
         paint.setTypeface(android.graphics.Typeface.DEFAULT);
         paint.setTextSize(9 * unit);
         paint.setColor(Color.argb(220, 159, 235, 255));
-        String caption = state == State.LISTENING ? "LISTENING"
-                : state == State.THINKING ? "PROCESSING"
+        String caption = state == State.INITIALIZING ? "INITIALIZING"
+                : state == State.DISCONNECTED ? "DISCONNECTED"
+                : state == State.LISTENING ? "LISTENING"
+                : state == State.TRANSCRIBING ? "TRANSCRIBING"
+                : state == State.THINKING || state == State.STREAMING ? "PROCESSING"
                 : state == State.SPEAKING ? "SPEAKING"
-                : state == State.ERROR ? "CONNECTION ERROR" : "AI CORE ONLINE";
+                : state == State.ERROR ? "ASSISTANT ERROR"
+                : state == State.PAUSED ? "PAUSED" : "AI CORE ONLINE";
         canvas.drawText(caption, x, y + 98 * unit, paint);
         if (active && resumed && motionEnabled() && getWindowVisibility() == VISIBLE && isShown()) {
             postInvalidateDelayed(40);
